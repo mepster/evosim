@@ -1,13 +1,6 @@
 from scipy.stats import binom
 import matplotlib.pyplot as plt
-
-import matplotlib.colors as col
-import colorsys
-def scale_lightness(rgb, scale_l):
-    # convert rgb to hls
-    h, l, s = colorsys.rgb_to_hls(*rgb)
-    # manipulate h, l, s values and return as rgb
-    return colorsys.hls_to_rgb(h, min(1, l * scale_l), s = s)
+from helpers import *
 
 class Clade:
     def __init__(self, nA, nB, mu):
@@ -39,7 +32,7 @@ class Clade:
     def normalize(self, sumN, maxN):
         fracA = float(self.nA)/sumN # fraction of this clade's A out of entire pop
         fracB = float(self.nB)/sumN # fraction of this clade's B out of entire pop
-        if maxN == -1: # infinite pop
+        if maxN < 0: # infinite pop
             self.nA = fracA
             self.nB = fracB
         else:
@@ -63,7 +56,7 @@ class Pop:
 
         self.clades = []
         for idx, m in enumerate(range(minMu, minMu+numClades)):
-            if self.maxN == -1: # infinite pop
+            if self.maxN < 0: # infinite pop
                 nA = 1.0 / numClades * fracA
                 nB = 1.0 / numClades * (1 - fracA)
             else:
@@ -115,42 +108,62 @@ def main():
     gen = 0
 
     # maxN = -1 means infinite pop
-    maxN = -1
+    maxN = 100000
     fracA = 0.1
     minMu = 2
     numClades = 5
     pop = Pop(maxN=maxN, fracA=fracA, minMu=minMu, numClades=numClades)
 
-    maxEpochs = 2
-    epochGen = 500
-    s = 0.01
+    maxEpochs = 4
+    epochGen = 10000
+    s = 0.002
 
-    for epoch in range(maxEpochs):
-        print(f"epoch: {epoch}")
-        for _ in range(epochGen):
+    envt = 1 # immediately switches to 0
+    for gen in range(maxEpochs*epochGen):
+        if gen%epochGen == 0:
+            envt = (envt+1)%2
+            print(f"gen:{gen} epoch:{int(gen/epochGen)} envt:{envt}")
+
+        if envt == 0:
             pop.one_gen(gen, sA=s, sB=0.0)
-            gen=gen+1
-        for _ in range(epochGen):
+        else:
             pop.one_gen(gen, sA=0.0, sB=s)
-            gen=gen+1
+    print()
 
-    sT = s*epochGen
-    if sT<=5.0:
-        print(f"LOW sT:{sT}")
+    # check sT
+    sT = round(s*epochGen, 2)
+    if sT<5.0:
+        print(f"*** LOW sT:{sT}")
     else:
         print(f"sT:{sT}")
 
-    colors = [col.ColorConverter.to_rgb(x) for x in ["darkred", "darkorange", "darkgreen", "navy", "darkviolet" ]]
-    for idx, clade in enumerate(pop.clades):
-        shades = [scale_lightness(colors[idx], scale) for scale in [0, .5, 1, 1.5, 2]]
-        plt.plot(clade.counts, color=shades[3], linestyle="-", label=f"m{minMu+idx} all")
-        plt.plot(clade.countsA, color=shades[3], linestyle=":", label=f"m{minMu+idx} A")
-        plt.plot(clade.countsB, color=shades[3], linestyle="--", label=f"m{minMu+idx} B")
+    print(f"N/s:{maxN/s:.1e}")
+
+    strN = "Inf" if maxN==-1 else f"{maxN:.1e}"
+    plt.title(f"N={strN} sT={sT:.1e}") #s={s:.1e} T={epochGen:.1e}")#
+    if 1:
+        colors = [col.ColorConverter.to_rgb(x) for x in ["darkred", "darkorange", "darkgreen", "navy", "darkviolet" ]]
+        for idx, clade in enumerate(pop.clades):
+            shades = [scale_lightness(colors[idx], scale) for scale in [0, .5, 1, 1.5, 2]]
+            plt.plot(clade.counts, color=shades[3], linestyle="-", label=f"m{minMu+idx} all")
+            plt.plot(clade.countsA, color=shades[3], linestyle=":", label=f"m{minMu+idx} A")
+            plt.plot(clade.countsB, color=shades[3], linestyle="--", label=f"m{minMu+idx} B")
+    else:
+        list_of_As = [x.countsA for x in pop.clades]
+        allA = [sum(x) for x in zip(*list_of_As)]
+        plt.plot(allA, label="all A")
+        list_of_Bs = [x.countsB for x in pop.clades]
+        allB = [sum(x) for x in zip(*list_of_Bs)]
+        plt.plot(allB, label="all B")
+
     #plt.xscale("log")
+    plt.locator_params(axis='x', nbins=5)
     plt.ylim(bottom=0)
     plt.legend(bbox_to_anchor=(1.05, 1.0), loc='upper left')
     plt.tight_layout()
     plt.show()
 
+
 if __name__ == '__main__':
+    #print( MyFormatter().format('{0:.1e}',0.00665745511651039) )
     main()
