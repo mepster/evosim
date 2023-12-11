@@ -4,14 +4,16 @@ import numpy as np
 from helpers import *
 
 class Environment():
-    def __init__(self, sA, sB):
+    def __init__(self, sA, sB, idx):
+        self.idx = idx
         self.sA = sA
         self.sB = sB
 
     def __repr__(self):
-        return f"sA:{self.sA} sB:{self.sB}"
+        return f"idx:{self.idx} sA:{self.sA} sB:{self.sB}"
 
     def swap(self):
+        self.idx = (self.idx+1)%2
         tmp = self.sA
         self.sA = self.sB
         self.sB = tmp
@@ -24,7 +26,7 @@ class Clade:
         numClades = args['numClades']
 
         self.m = m
-        self.mu = 0.0001#10.0**(-1.0 * (m+2))
+        self.mu = 10.0**(-1.0 * (m+2))
         self.hog = 2.0** (numClades-m-1)
         self.label = f"q{m+2}"
 
@@ -41,9 +43,20 @@ class Clade:
 
         self.init_data()
 
+    def init_data(self):
+        self.countsA = []
+        self.countsB = []
+        self.counts = []
+
+    def update_data(self):
+        self.countsA.append(self.nA)
+        self.countsB.append(self.nB)
+        self.counts.append(self.nA+self.nB)
+
     def __repr__(self):
         ret = ""
-        ret = ret + f"nA: {self.nA:8.3f} nB:{self.nB:8.3f}, (n:{self.nA+self.nB:8.3f}) mu:{self.mu:.2e} hog:{self.hog:.2e}"
+        ret = ret + f"nA: {self.nA:10.2f} nB:{self.nB:10.2f}, (n:{self.nA+self.nB:10.2f}) \
+            mu:{self.mu:.2e} hog:{self.hog:.2e}"
         return ret
 
     def select(self, env):
@@ -75,16 +88,6 @@ class Clade:
             self.nA = 0 if fracA == 0.0 else binom.rvs(n=round(maxN/self.hog), p=fracA) # total N of this type
             self.nB = 0 if fracB == 0.0 else binom.rvs(n=round(maxN/self.hog), p=fracB) # total N of this type
 
-    def init_data(self):
-        self.countsA = []
-        self.countsB = []
-        self.counts = []
-
-    def update_data(self):
-        self.countsA.append(self.nA)
-        self.countsB.append(self.nB)
-        self.counts.append(self.nA+self.nB)
-
 
 class Pop:
     def __init__(self, args):
@@ -97,12 +100,23 @@ class Pop:
             clade = Clade(m, args)
             self.clades.append(clade)
 
+        self.init_data()
+
+    def init_data(self):
+        self.envs = []
+
+    def update_data(self):
+        self.envs.append(self.env.idx)
+
+        for clade in self.clades:
+            clade.update_data()
+
     def __repr__(self):
         ret = ""
         for idx, clade in enumerate(self.clades):
             ret = ret + f"  clade {clade.label}: {clade}\n"
-        ret = ret + f"  sumR: {self.sumR():.3f}\n"
-        ret = ret + f"  sumN: {self.sumN():.3f}\n"
+        ret = ret + f"  sumR: {self.sumR():10.2f}\n"
+        ret = ret + f"  sumN: {self.sumN():10.2f}\n"
         ret = ret + f"  env: {self.env}\n"
         return ret
 
@@ -136,10 +150,6 @@ class Pop:
             clade.normalize(sumN, sumR, self.maxN)
         #print(f"AFTER sumR:{self.sumR()}")
 
-    def update_data(self):
-        for clade in self.clades:
-            clade.update_data()
-
     # def one_gen_with_mutation(self, gen):
     #     self.update_data()
     #     self.select() # converts from int to freq
@@ -158,10 +168,10 @@ class Grid():
         self.pops = []
         for idx in range(self.numPops):
             if idx%2 == 0:
-                args['env'] = Environment(sA=s, sB=0.0)  # immediately swaps at gen 0
+                args['env'] = Environment(idx=1, sA=0.0, sB=s)  # immediately swaps at gen 0
                 args['aToB'] = aToB
             else:
-                args['env'] = Environment(sA=0.0, sB=s) # immediately swaps at gen 0
+                args['env'] = Environment(idx=0, sA=s, sB=0.0) # immediately swaps at gen 0
                 args['aToB'] = 1.0-aToB
             pop = Pop(args)
             self.pops.append(pop)
@@ -239,9 +249,10 @@ class Grid():
         else:
             raise Exception(f"invalid mode: {self.mode}")
 
+
 def main():
-    maxN = 100000 # maxN = -1 means infinite pop
-    numEpochs = 10
+    maxN = 1000000 # maxN = -1 means infinite pop
+    numEpochs = 8
     epochGen = 10000
 
     if 1:
@@ -252,7 +263,7 @@ def main():
         numPops = 2
 
     aToB = 0.55
-    s = 0.01
+    s = 0.001
     numClades = 4
 
     args = {'numPops': numPops, 'numClades': numClades, 'maxN': maxN, 's':s, 'aToB': aToB, 'minMu':2, 'mode':mode}
@@ -277,7 +288,7 @@ def main():
     strN = "Inf" if maxN < 0 else f"{e_format(maxN)}"
     colors = [col.ColorConverter.to_rgb(x) for x in ["darkred", "orange", "darkgreen", "navy", "darkviolet" ]]
 
-    fig, axes = plt.subplots(numPops, layout='constrained', figsize=(6.4, numPops*4.8)) # 6.4x4.8
+    fig, axes = plt.subplots(numPops, layout='constrained', figsize=(6.4, numPops*4.8)) # 6.4x4.8.
     if numPops == 1: axes = [axes]
     fig.suptitle(f"N={strN}, T={e_format(epochGen)}, s={e_format(s)}, {mode} mode")
 
@@ -310,6 +321,10 @@ def main():
             ax.set_ylabel(f"pop {idx}")
 
         #plt.figlegend(bbox_to_anchor=(1.05, 1.0), loc='upper left')
+
+    #ax = axes[numPops]
+    #ax.plot(grid.pops[0].envs)
+
     plt.figlegend(handles=handles, labels=labels, loc='outside right center')
     #plt.tight_layout()
     plt.show()
