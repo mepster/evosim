@@ -18,16 +18,32 @@ class Environment():
 
 
 class Clade:
-    def __init__(self, nA, nB, mu, label):
-        self.nA = nA
-        self.nB = nB
-        self.mu = mu
-        self.label = label
+    def __init__(self, m, args):
+        maxN = args['maxN']
+        aToB = args['aToB']
+        numClades = args['numClades']
+
+        self.m = m
+        self.mu = 0.0001#10.0**(-1.0 * (m+2))
+        self.hog = 2.0** (numClades-m-1)
+        self.label = f"q{m+2}"
+
+        fracA = 1.0 / numClades * aToB         # fraction of total resource this type gets
+        fracB = 1.0 / numClades * (1.0 - aToB) # fraction of total resource this type gets
+        if maxN < 0:  # infinite pop
+            self.nA = fracA / self.hog
+            self.nB = fracB / self.hog
+        else:
+            # self.nA = binom.rvs(n=maxN, p=fracA / self.hog)
+            # self.nB = binom.rvs(n=maxN, p=fracB / self.hog)
+            self.nA = binom.rvs(n=round(maxN/self.hog), p=fracA)
+            self.nB = binom.rvs(n=round(maxN/self.hog), p=fracB)
+
         self.init_data()
 
     def __repr__(self):
         ret = ""
-        ret = ret + f"nA: {self.nA:10.2f} nB:{self.nB:10.2f}, (n:{self.nA+self.nB:10.2f}) mu:{self.mu}"
+        ret = ret + f"nA: {self.nA:8.3f} nB:{self.nB:8.3f}, (n:{self.nA+self.nB:8.3f}) mu:{self.mu:.2e} hog:{self.hog:.2e}"
         return ret
 
     def select(self, env):
@@ -37,24 +53,27 @@ class Clade:
 
     def mutate(self):
         # nA and nB in each clade are non-integer after this, and sumN != maxN
-        AtoB = self.nA*self.mu
+        aToB = self.nA*self.mu
         AtoA = self.nA*(1.0-self.mu)
         BtoA = self.nB*self.mu
         BtoB = self.nB*(1.0-self.mu)
-        #print(f"AtoA:{AtoA} AtoB:{AtoB} BtoB:{BtoB} BtoA:{BtoA}")
+        #print(f"AtoA:{AtoA} aToB:{aToB} BtoB:{BtoB} BtoA:{BtoA}")
         self.nA = AtoA + BtoA
-        self.nB = AtoB + BtoB
+        self.nB = aToB + BtoB
 
-    def normalize(self, sumN, maxN):
-        fracA = float(self.nA)/sumN # fraction of this clade's A out of entire pop
-        fracB = float(self.nB)/sumN # fraction of this clade's B out of entire pop
+    def normalize(self, sumN, sumR, maxN):
+        #print(f"sumN:{sumN} sumR:{sumR}")
+        fracA = float(self.nA) * self.hog / sumR # fraction of total resource this type gets
+        fracB = float(self.nB) * self.hog / sumR # fraction of total resource this type gets
         if maxN < 0: # infinite pop
-            self.nA = fracA
-            self.nB = fracB
+            self.nA = fracA / self.hog # total N of this type
+            self.nB = fracB / self.hog # total N of this type
         else:
             # save computing binom if frac is 0.0 anyway
-            self.nA = 0 if fracA == 0.0 else int(binom.rvs(n=maxN, p=fracA))
-            self.nB = 0 if fracB == 0.0 else int(binom.rvs(n=maxN, p=fracB))
+            # self.nA = 0 if fracA == 0.0 else binom.rvs(n=maxN, p=fracA / self.hog) # total N of this type
+            # self.nB = 0 if fracB == 0.0 else binom.rvs(n=maxN, p=fracB / self.hog) # total N of this type
+            self.nA = 0 if fracA == 0.0 else binom.rvs(n=round(maxN/self.hog), p=fracA) # total N of this type
+            self.nB = 0 if fracB == 0.0 else binom.rvs(n=round(maxN/self.hog), p=fracB) # total N of this type
 
     def init_data(self):
         self.countsA = []
@@ -69,34 +88,35 @@ class Clade:
 
 class Pop:
     def __init__(self, args):
-        # fracA is initial fraction of A in this clade
-        minMu = args['minMu']
-        numClades = args['numClades']
-        fracA = args['fracA']
         self.maxN = args['maxN']
         self.env = args['env']
+        numClades = args['numClades']
 
         self.clades = []
-        for idx, m in enumerate(range(minMu, minMu+numClades)):
-            if self.maxN < 0: # infinite pop
-                nA = 1.0 / numClades * fracA
-                nB = 1.0 / numClades * (1.0 - fracA)
-            else:
-                nA = binom.rvs(n=self.maxN, p=1.0 / numClades * fracA)
-                nB = binom.rvs(n=self.maxN, p=1.0 / numClades * (1.0 - fracA))
-
-            clade = Clade(nA=nA, nB=nB, mu=10**(-1.0 * m), label=str(idx+minMu))
+        for m in range(0, numClades):
+            clade = Clade(m, args)
             self.clades.append(clade)
 
     def __repr__(self):
-        sumN = 0
         ret = ""
         for idx, clade in enumerate(self.clades):
-            ret = ret + f"  clade {idx}: {clade}\n"
-            sumN = sumN + clade.nA + clade.nB
-        ret = ret + f"  sumN: {sumN:.2f}\n"
+            ret = ret + f"  clade {clade.label}: {clade}\n"
+        ret = ret + f"  sumR: {self.sumR():.3f}\n"
+        ret = ret + f"  sumN: {self.sumN():.3f}\n"
         ret = ret + f"  env: {self.env}\n"
         return ret
+
+    def sumR(self): # this uses hog to sum in terms of resources
+        sumR = 0.0
+        for clade in self.clades:
+            sumR = sumR + clade.hog*(clade.nA + clade.nB) # scale by hog - amt of resources consumed
+        return sumR
+
+    def sumN(self): # counts individuals, ignoring resources
+        sumN = 0.0
+        for clade in self.clades:
+            sumN = sumN + (clade.nA + clade.nB)
+        return sumN
 
     def select(self):
         # nA and nB in each clade are non-integer after this, and sum != maxN
@@ -109,11 +129,12 @@ class Pop:
             clade.mutate()
 
     def normalize(self):
-        sumN = 0
+        sumN = self.sumN()
+        sumR = self.sumR()
+        #print(f"BEFORE sumR:{self.sumR()}")
         for clade in self.clades:
-            sumN = sumN + clade.nA + clade.nB
-        for clade in self.clades:
-            clade.normalize(sumN, self.maxN)
+            clade.normalize(sumN, sumR, self.maxN)
+        #print(f"AFTER sumR:{self.sumR()}")
 
     def update_data(self):
         for clade in self.clades:
@@ -132,16 +153,16 @@ class Grid():
         self.numClades = args['numClades']
         self.mode = args['mode'] # 'mutation' or 'migration
         s = args['s']
-        fracA = args['fracA']
+        aToB = args['aToB']
 
         self.pops = []
         for idx in range(self.numPops):
             if idx%2 == 0:
                 args['env'] = Environment(sA=s, sB=0.0)  # immediately swaps at gen 0
-                args['fracA'] = fracA
+                args['aToB'] = aToB
             else:
                 args['env'] = Environment(sA=0.0, sB=s) # immediately swaps at gen 0
-                args['fracA'] = 1.0-fracA
+                args['aToB'] = 1.0-aToB
             pop = Pop(args)
             self.pops.append(pop)
 
@@ -219,8 +240,9 @@ class Grid():
             raise Exception(f"invalid mode: {self.mode}")
 
 def main():
-    maxN = -1#1000000 # maxN = -1 means infinite pop
-    numClades = 5
+    maxN = 100000 # maxN = -1 means infinite pop
+    numEpochs = 10
+    epochGen = 10000
 
     if 1:
         mode = 'mutation'
@@ -229,13 +251,11 @@ def main():
         mode = 'migration'
         numPops = 2
 
-    fracA = 0.5
-    s = 0.001
+    aToB = 0.55
+    s = 0.01
+    numClades = 4
 
-    numEpochs = 8
-    epochGen = 10000
-
-    args = {'numPops': numPops, 'numClades': numClades, 'maxN': maxN, 's':s, 'fracA': fracA, 'minMu':2, 'mode':mode}
+    args = {'numPops': numPops, 'numClades': numClades, 'maxN': maxN, 's':s, 'aToB': aToB, 'minMu':2, 'mode':mode}
     grid = Grid(args)
 
     for gen in range(numEpochs*epochGen):
@@ -248,13 +268,13 @@ def main():
         print(f"*** LOW sT:{sT:.1f}")
     else:
         print(f"sT:{sT:.1f}")
-    if maxN>1: print(f"N/s:{e_format(maxN/s)}")
+    #if maxN>1: print(f"N/s:{e_format(maxN/s)}")
 
     print("mode:", args['mode'])
 
     ## plots
 
-    strN = "Inf" if maxN==-1 else f"{e_format(maxN)}"
+    strN = "Inf" if maxN < 0 else f"{e_format(maxN)}"
     colors = [col.ColorConverter.to_rgb(x) for x in ["darkred", "orange", "darkgreen", "navy", "darkviolet" ]]
 
     fig, axes = plt.subplots(numPops, layout='constrained', figsize=(6.4, numPops*4.8)) # 6.4x4.8
@@ -271,15 +291,16 @@ def main():
                 #handles.append(ax.plot(clade.counts, color=shades[3], linestyle="-")[0]) # note [0]
                 #labels.append(f"m{clade.label} all")
                 handles.append(ax.plot(clade.countsA, color=shades[2], linestyle="-")[0])
-                labels.append(f"m{clade.label} A")
+                labels.append(f"{clade.label} A")
                 handles.append(ax.plot(clade.countsB, color=shades[4], linestyle=":")[0])
-                labels.append(f"m{clade.label} B")
+                labels.append(f"{clade.label} B")
             else:
                 #ax.plot(clade.counts, color=shades[3], linestyle="-")
                 ax.plot(clade.countsA, color=shades[2], linestyle="-")
                 ax.plot(clade.countsB, color=shades[4], linestyle=":")
-        # ax.xscale("log")
+        #ax.xscale("log")
         ax.locator_params(axis='x', nbins=5)  # just put 5 major tics
+        #ax.set_ylim(0, 1.0) if maxN<0 else ax.set_ylim(0, maxN)
         ax.set_yscale("log", nonpositive='mask')
 
         plt.xlabel("generations")
