@@ -27,8 +27,8 @@ class Clade:
 
         self.m = m
         self.mu = 10.0**(-1.0 * (m+2))
-        self.hog = 2.0** (numClades-m-1)
-        self.label = f"q{m+2}"
+        self.hog = 1.0#2.0** (numClades-m-1)
+        self.label = f"m{m+2}"
 
         fracA = 1.0 / numClades * aToB         # fraction of total resource this type gets
         fracB = 1.0 / numClades * (1.0 - aToB) # fraction of total resource this type gets
@@ -36,10 +36,7 @@ class Clade:
             self.nA = fracA / self.hog
             self.nB = fracB / self.hog
         else:
-            # self.nA = binom.rvs(n=maxN, p=fracA / self.hog)
-            # self.nB = binom.rvs(n=maxN, p=fracB / self.hog)
-            self.nA = binom.rvs(n=round(maxN/self.hog), p=fracA)
-            self.nB = binom.rvs(n=round(maxN/self.hog), p=fracB)
+            self.nA, self.nB = binom.rvs(n=round(maxN/self.hog), p=[fracA, fracB])
 
         self.init_data()
 
@@ -83,8 +80,6 @@ class Clade:
             self.nB = fracB / self.hog # total N of this type
         else:
             # save computing binom if frac is 0.0 anyway
-            # self.nA = 0 if fracA == 0.0 else binom.rvs(n=maxN, p=fracA / self.hog) # total N of this type
-            # self.nB = 0 if fracB == 0.0 else binom.rvs(n=maxN, p=fracB / self.hog) # total N of this type
             self.nA = 0 if fracA == 0.0 else binom.rvs(n=round(maxN/self.hog), p=fracA) # total N of this type
             self.nB = 0 if fracB == 0.0 else binom.rvs(n=round(maxN/self.hog), p=fracB) # total N of this type
 
@@ -251,11 +246,11 @@ class Grid():
 
 
 def main():
-    maxN = 1000000 # maxN = -1 means infinite pop
+    maxN = -100000 # maxN = -1 means infinite pop
     numEpochs = 8
-    epochGen = 10000
+    epochGen = 1000
 
-    if 1:
+    if 0:
         mode = 'mutation'
         numPops = 1
     else:
@@ -263,7 +258,7 @@ def main():
         numPops = 2
 
     aToB = 0.55
-    s = 0.001
+    s = 0.01
     numClades = 4
 
     args = {'numPops': numPops, 'numClades': numClades, 'maxN': maxN, 's':s, 'aToB': aToB, 'minMu':2, 'mode':mode}
