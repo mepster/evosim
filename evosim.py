@@ -8,44 +8,42 @@ class Environment():
         self.idx = idx
         self.sA = sA
         self.sB = sB
+        self.active_env = [] # pairs of (gen, env)
 
     def __repr__(self):
         return f"idx:{self.idx} sA:{self.sA} sB:{self.sB}"
 
-    def swap(self):
+    def swap(self, gen): # swap which allele is favored
         self.idx = (self.idx+1)%2
         tmp = self.sA
         self.sA = self.sB
         self.sB = tmp
-
+        self.active_env.append((gen, self.idx)) # record that at generation gen we swapped to env idx
 
 class Clade:
     def __init__(self, m, args):
         maxN = args['maxN']
         aToB = args['aToB']
         numClades = args['numClades']
+        minMu = args['minMu']
 
         self.m = m
-        self.mu = 10.0**(-1.0 * (m+2))
-        self.hog = 1.0#2.0** (numClades-m-1)
-        self.label = f"m{m+2}"
+        self.mu = 10.0**(-1.0 * (m+minMu))
+        self.label = f"m{m+minMu}"
 
-        fracA = 1.0 / numClades * aToB         # fraction of total resource this type gets
-        fracB = 1.0 / numClades * (1.0 - aToB) # fraction of total resource this type gets
+        fracA = 1.0 / numClades * aToB 
+        fracB = 1.0 / numClades * (1.0 - aToB) 
         if maxN < 0:  # infinite pop
-            self.nA = fracA / self.hog
-            self.nB = fracB / self.hog
+            self.nA = fracA
+            self.nB = fracB
         else:
-            self.nA, self.nB = binom.rvs(n=round(maxN/self.hog), p=[fracA, fracB])
+            self.nA, self.nB = binom.rvs(n=round(maxN), p=[fracA, fracB])
 
-        self.init_data()
-
-    def init_data(self):
         self.countsA = []
         self.countsB = []
         self.counts = []
 
-    def update_data(self):
+    def update_gen_data(self):
         self.countsA.append(self.nA)
         self.countsB.append(self.nB)
         self.counts.append(self.nA+self.nB)
@@ -53,7 +51,7 @@ class Clade:
     def __repr__(self):
         ret = ""
         ret = ret + f"nA: {self.nA:10.2f} nB:{self.nB:10.2f}, (n:{self.nA+self.nB:10.2f}) \
-            mu:{self.mu:.2e} hog:{self.hog:.2e}"
+            mu:{self.mu:.2e}"
         return ret
 
     def select(self, env):
@@ -73,15 +71,15 @@ class Clade:
 
     def normalize(self, sumN, sumR, maxN):
         #print(f"sumN:{sumN} sumR:{sumR}")
-        fracA = float(self.nA) * self.hog / sumR # fraction of total resource this type gets
-        fracB = float(self.nB) * self.hog / sumR # fraction of total resource this type gets
+        fracA = float(self.nA) / sumR # fraction of total resource this type gets
+        fracB = float(self.nB) / sumR # fraction of total resource this type gets
         if maxN < 0: # infinite pop
-            self.nA = fracA / self.hog # total N of this type
-            self.nB = fracB / self.hog # total N of this type
+            self.nA = fracA # total N of this type
+            self.nB = fracB # total N of this type
         else:
             # save computing binom if frac is 0.0 anyway
-            self.nA = 0 if fracA == 0.0 else binom.rvs(n=round(maxN/self.hog), p=fracA) # total N of this type
-            self.nB = 0 if fracB == 0.0 else binom.rvs(n=round(maxN/self.hog), p=fracB) # total N of this type
+            self.nA = 0 if fracA == 0.0 else binom.rvs(n=round(maxN), p=fracA) # total N of this type
+            self.nB = 0 if fracB == 0.0 else binom.rvs(n=round(maxN), p=fracB) # total N of this type
 
 
 class Pop:
@@ -91,20 +89,17 @@ class Pop:
         numClades = args['numClades']
 
         self.clades = []
-        for m in range(0, numClades):
-            clade = Clade(m, args)
-            self.clades.append(clade)
+        # for m in range(0, numClades):
+        #     clade = Clade(m, args)
+        #     self.clades.append(clade)
+        args["numClades"] = 1
+        clade = Clade(numClades-3, args)
+        self.clades.append(clade)
 
-        self.init_data()
-
-    def init_data(self):
-        self.envs = []
-
-    def update_data(self):
-        self.envs.append(self.env.idx)
-
+    def update_gen_data(self):
         for clade in self.clades:
-            clade.update_data()
+            clade.update_gen_data()
+        # update the Pop's own data here
 
     def __repr__(self):
         ret = ""
@@ -115,10 +110,10 @@ class Pop:
         ret = ret + f"  env: {self.env}\n"
         return ret
 
-    def sumR(self): # this uses hog to sum in terms of resources
+    def sumR(self): # to sum in terms of resources
         sumR = 0.0
         for clade in self.clades:
-            sumR = sumR + clade.hog*(clade.nA + clade.nB) # scale by hog - amt of resources consumed
+            sumR = sumR + (clade.nA + clade.nB)
         return sumR
 
     def sumN(self): # counts individuals, ignoring resources
@@ -146,7 +141,7 @@ class Pop:
         #print(f"AFTER sumR:{self.sumR()}")
 
     # def one_gen_with_mutation(self, gen):
-    #     self.update_data()
+    #     self.update_gen_data()
     #     self.select() # converts from int to freq
     #     self.mutate() # works on freq
     #     self.normalize() # converts from freq to int
@@ -182,8 +177,8 @@ class Grid():
             return
 
         # for each pop, accumulate inbound and outbound counts of each type
-        # there are numPops * numClades * numTypes total counts
-        numTypes = 2
+        # there are numPops * numClades * numTypes distinct counts. For each pop, numClades clades. For each clade, numTypes types (A and B).
+        numTypes = 2 # A and B
         current = np.zeros(shape = (self.numPops, self.numClades, numTypes)) # current residents
         mig = np.zeros(shape = (self.numPops, self.numClades, numTypes)) # migration rate
         for j, pop in enumerate(self.pops):
@@ -222,19 +217,20 @@ class Grid():
 
             print("swap environments")
             for pop in self.pops:
-                pop.env.swap()
+                pop.env.swap(gen)
 
             print(self) # start of every epoch
 
         if self.mode == 'mutation':
             for pop in self.pops:
-                pop.update_data()
+                pop.update_gen_data()
                 pop.select()  # converts from int to freq
                 pop.mutate()  # works on freq
                 pop.normalize()  # converts from freq to int
+
         elif self.mode == 'migration':
             for pop in self.pops:
-                pop.update_data()
+                pop.update_gen_data()
                 pop.select() # converts from int to freq
 
             self.migrate() # works on freq
@@ -246,30 +242,31 @@ class Grid():
 
 
 def main():
-    maxN = -100000 # maxN = -1 means infinite pop
-    numEpochs = 8
-    epochGen = 1000
+    maxN = 10000 # maxN < 0 means infinite pop
+    numEpochs = 5
+    T = 250
 
-    if 0:
+    if True:
         mode = 'mutation'
         numPops = 1
     else:
         mode = 'migration'
         numPops = 2
 
-    aToB = 0.55
-    s = 0.01
-    numClades = 4
+    #aToB = 0.0
+    aToB = 0.5
+    s = 0.1 # 10./T
+    numClades = 6
 
     args = {'numPops': numPops, 'numClades': numClades, 'maxN': maxN, 's':s, 'aToB': aToB, 'minMu':2, 'mode':mode}
     grid = Grid(args)
 
-    for gen in range(numEpochs*epochGen):
-        grid.one_gen(gen, epochGen)
+    for gen in range(int(numEpochs*T)):
+        grid.one_gen(gen, T)
     print()
 
     # check sT and N/s
-    sT = round(s*epochGen, 2)
+    sT = round(s*T, 2)
     if sT<5.0:
         print(f"*** LOW sT:{sT:.1f}")
     else:
@@ -281,34 +278,51 @@ def main():
     ## plots
 
     strN = "Inf" if maxN < 0 else f"{e_format(maxN)}"
-    colors = [col.ColorConverter.to_rgb(x) for x in ["darkred", "orange", "darkgreen", "navy", "darkviolet" ]]
+    colors = [col.ColorConverter.to_rgb(x) for x in ["darkred", "orange", "darkgreen", "navy", "darkviolet", "black"]]
 
     fig, axes = plt.subplots(numPops, layout='constrained', figsize=(6.4, numPops*4.8)) # 6.4x4.8.
     if numPops == 1: axes = [axes]
-    fig.suptitle(f"N={strN}, T={e_format(epochGen)}, s={e_format(s)}, {mode} mode")
+    if 0:
+        fig.suptitle(f"N={strN}, T={e_format(T)}, s={e_format(s)}, {mode} mode")
 
     labels = []
     handles = []
+    plot_total = False
+    
     for idx, pop in enumerate(grid.pops):
         ax = axes[idx]
         for idx2, clade in enumerate(pop.clades):
             shades = [scale_lightness(colors[idx2], scale) for scale in [0.5, .75, 1., 1.25, 1.5]]
             if idx==0: # with handles and labels
-                #handles.append(ax.plot(clade.counts, color=shades[3], linestyle="-")[0]) # note [0]
-                #labels.append(f"m{clade.label} all")
-                handles.append(ax.plot(clade.countsA, color=shades[2], linestyle="-")[0])
-                labels.append(f"{clade.label} A")
-                handles.append(ax.plot(clade.countsB, color=shades[4], linestyle=":")[0])
-                labels.append(f"{clade.label} B")
+                if plot_total:
+                    handles.append(ax.plot(clade.counts, color=shades[3], linestyle="-")[0]) # note [0]
+                    labels.append(r"$\mathit{M}_{{%d}},(A+a)$" % (clade.m + args['minMu']))
+                else:
+                    handles.append(ax.plot(clade.countsA, color=shades[2], linestyle="-")[0])
+                    labels.append(r"$\mathit{M}_{{%d}},A$" % (clade.m + args['minMu']))
+                    handles.append(ax.plot(clade.countsB, color=shades[4], linestyle=":")[0])
+                    labels.append(r"$\mathit{M}_{{%d}},a$" % (clade.m + args['minMu']))
             else:
-                #ax.plot(clade.counts, color=shades[3], linestyle="-")
-                ax.plot(clade.countsA, color=shades[2], linestyle="-")
-                ax.plot(clade.countsB, color=shades[4], linestyle=":")
-        #ax.xscale("log")
+                if plot_total:
+                    ax.plot(clade.counts, color=shades[3], linestyle="-")
+                else:
+                    ax.plot(clade.countsA, color=shades[2], linestyle="-")
+                    ax.plot(clade.countsB, color=shades[4], linestyle=":")
         ax.locator_params(axis='x', nbins=5)  # just put 5 major tics
+        #ax.set_xscale("log")
         #ax.set_ylim(0, 1.0) if maxN<0 else ax.set_ylim(0, maxN)
-        ax.set_yscale("log", nonpositive='mask')
+        if 0:
+            if maxN<0: # for infinite pop
+                ax.set_ylim(1e-10, 1.0)
+            ax.set_yscale("log", nonpositive='mask')
+        
+        for swap_gen, env_idx in pop.env.active_env:
+            ax.axvline(x=swap_gen, color='gray', linestyle='--', linewidth=1)
+            label = 'A' if env_idx == 0 else 'a'
+            y_pos = ax.get_ylim()[1]
+            ax.text(swap_gen, y_pos, label, color='gray', ha='center', va='bottom', fontsize=10)
 
+        plt.ylabel("N" if maxN>0 else "frequency")
         plt.xlabel("generations")
         [axes[idx].tick_params(labelbottom=False) for idx in range(numPops-1)]
 
@@ -316,12 +330,15 @@ def main():
             ax.set_ylabel(f"pop {idx}")
 
         #plt.figlegend(bbox_to_anchor=(1.05, 1.0), loc='upper left')
+        
+        print(f"pop {idx} env: {pop.env.active_env}")
 
     #ax = axes[numPops]
     #ax.plot(grid.pops[0].envs)
 
     plt.figlegend(handles=handles, labels=labels, loc='outside right center')
     #plt.tight_layout()
+    plt.savefig(f"plot1.png", dpi=300)
     plt.show()
 
 
