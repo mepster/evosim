@@ -242,9 +242,10 @@ class Grid():
 
 
 def main():
-    maxN = 100000 # maxN < 0 means infinite pop
-    numEpochs = 1
+    maxN = 1e9 # maxN < 0 means infinite pop
+    numEpochs = 10
     T = 1e4
+    s = 0.1 # 10./T
 
     if True:
         mode = 'mutation'
@@ -253,12 +254,14 @@ def main():
         mode = 'migration'
         numPops = 2
 
+    minMu = 2;     assert 2 <= minMu and minMu <= 8
+    numClades = 3; assert 3 <= minMu+numClades and minMu+numClades <= 9 
+
+    # starting ratio of A to a (aka B) in each clade
     aToB = 0.0
     #aToB = 0.5
-    s = 0.1 # 10./T
-    numClades = 1
 
-    args = {'numPops': numPops, 'numClades': numClades, 'maxN': maxN, 's':s, 'aToB': aToB, 'minMu':2, 'mode':mode}
+    args = {'numPops': numPops, 'numClades': numClades, 'maxN': maxN, 's':s, 'aToB': aToB, 'minMu':minMu, 'mode':mode}
     grid = Grid(args)
 
     for gen in range(int(numEpochs*T)):
@@ -282,17 +285,19 @@ def main():
 
     fig, axes = plt.subplots(numPops, layout='constrained', figsize=(6.4, numPops*4.8)) # 6.4x4.8.
     if numPops == 1: axes = [axes]
-    if 0:
-        fig.suptitle(f"N={strN}, T={e_format(T)}, s={e_format(s)}, {mode} mode")
+    if 1:
+        fig.suptitle(f"N={strN}, T={e_format(T)}, s={e_format(s)}")
 
     labels = []
     handles = []
-    plot_total = False
+    plot_total = True
     
     for idx, pop in enumerate(grid.pops):
         ax = axes[idx]
         for idx2, clade in enumerate(pop.clades):
-            shades = [scale_lightness(colors[idx2], scale) for scale in [0.5, .75, 1., 1.25, 1.5]]
+            # Fixed colors: M2 is red, M3 is green, M4 is blue, M5 is magenta, M6 is cyan, M7 is yellow, 
+            # darker shade for allele A, lighter shade for allele a
+            shades = [scale_lightness(colors[clade.m + args['minMu'] - 2], scale) for scale in [0.5, .75, 1., 1.25, 1.5]]
             if idx==0: # with handles and labels
                 if plot_total:
                     handles.append(ax.plot(clade.counts, color=shades[3], linestyle="-")[0]) # note [0]
@@ -314,12 +319,13 @@ def main():
         if xlog:
             ax.set_xscale("log", nonpositive='mask')
 
-        if True: # ylog
+        ylog = True
+        if ylog:
             ax.set_yscale("log", nonpositive='mask')
             if maxN<0: # for infinite pop
                 ax.set_ylim(1e-8, 1.0)
-            #ax.set_ylim(0, 1.0) if maxN<0 else ax.set_ylim(0, maxN)
-        
+            else: 
+                ax.set_ylim(maxN*1e-6, 1.5*maxN)
         for swap_gen, env_idx in pop.env.active_env:
             ax.axvline(x=swap_gen+(1 if xlog else 0), color='gray', linestyle='--', linewidth=1)
             label = 'A' if env_idx == 0 else 'a'
@@ -342,7 +348,7 @@ def main():
 
     plt.figlegend(handles=handles, labels=labels, loc='outside right center')
     #plt.tight_layout()
-    plt.savefig(f"plot1.png", dpi=300)
+    plt.savefig(f"plot10.png", dpi=300)
     plt.show()
 
 
