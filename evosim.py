@@ -89,12 +89,12 @@ class Pop:
         numClades = args['numClades']
 
         self.clades = []
-        # for m in range(0, numClades):
-        #     clade = Clade(m, args)
-        #     self.clades.append(clade)
-        args["numClades"] = 1
-        clade = Clade(numClades-3, args)
-        self.clades.append(clade)
+        for m in range(0, numClades):
+            clade = Clade(m, args)
+            self.clades.append(clade)
+        # args["numClades"] = 1
+        # clade = Clade(numClades-3, args)
+        # self.clades.append(clade)
 
     def update_gen_data(self):
         for clade in self.clades:
@@ -242,9 +242,9 @@ class Grid():
 
 
 def main():
-    maxN = 10000 # maxN < 0 means infinite pop
-    numEpochs = 5
-    T = 250
+    maxN = 100000 # maxN < 0 means infinite pop
+    numEpochs = 1
+    T = 1e4
 
     if True:
         mode = 'mutation'
@@ -253,10 +253,10 @@ def main():
         mode = 'migration'
         numPops = 2
 
-    #aToB = 0.0
-    aToB = 0.5
+    aToB = 0.0
+    #aToB = 0.5
     s = 0.1 # 10./T
-    numClades = 6
+    numClades = 1
 
     args = {'numPops': numPops, 'numClades': numClades, 'maxN': maxN, 's':s, 'aToB': aToB, 'minMu':2, 'mode':mode}
     grid = Grid(args)
@@ -278,7 +278,7 @@ def main():
     ## plots
 
     strN = "Inf" if maxN < 0 else f"{e_format(maxN)}"
-    colors = [col.ColorConverter.to_rgb(x) for x in ["darkred", "orange", "darkgreen", "navy", "darkviolet", "black"]]
+    colors = [col.ColorConverter.to_rgb(x) for x in ["red", "green", "blue", "magenta", "cyan", "yellow", "black"]]
 
     fig, axes = plt.subplots(numPops, layout='constrained', figsize=(6.4, numPops*4.8)) # 6.4x4.8.
     if numPops == 1: axes = [axes]
@@ -309,18 +309,22 @@ def main():
                     ax.plot(clade.countsA, color=shades[2], linestyle="-")
                     ax.plot(clade.countsB, color=shades[4], linestyle=":")
         ax.locator_params(axis='x', nbins=5)  # just put 5 major tics
-        #ax.set_xscale("log")
-        #ax.set_ylim(0, 1.0) if maxN<0 else ax.set_ylim(0, maxN)
-        if 0:
-            if maxN<0: # for infinite pop
-                ax.set_ylim(1e-10, 1.0)
+        
+        xlog = True
+        if xlog:
+            ax.set_xscale("log", nonpositive='mask')
+
+        if True: # ylog
             ax.set_yscale("log", nonpositive='mask')
+            if maxN<0: # for infinite pop
+                ax.set_ylim(1e-8, 1.0)
+            #ax.set_ylim(0, 1.0) if maxN<0 else ax.set_ylim(0, maxN)
         
         for swap_gen, env_idx in pop.env.active_env:
-            ax.axvline(x=swap_gen, color='gray', linestyle='--', linewidth=1)
+            ax.axvline(x=swap_gen+(1 if xlog else 0), color='gray', linestyle='--', linewidth=1)
             label = 'A' if env_idx == 0 else 'a'
             y_pos = ax.get_ylim()[1]
-            ax.text(swap_gen, y_pos, label, color='gray', ha='center', va='bottom', fontsize=10)
+            ax.text(swap_gen+(1 if xlog else 0), y_pos, label, color='gray', ha='center', va='bottom', fontsize=10)
 
         plt.ylabel("N" if maxN>0 else "frequency")
         plt.xlabel("generations")
