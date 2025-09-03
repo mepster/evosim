@@ -243,8 +243,8 @@ class Grid():
 
 def main():
     maxN = 1e9 # maxN < 0 means infinite pop
-    numEpochs = 10
-    T = 1e4
+    numEpochs = 1
+    T = 1e5
     s = 0.1 # 10./T
 
     if True:
@@ -348,7 +348,7 @@ def main():
 
     plt.figlegend(handles=handles, labels=labels, loc='outside right center')
     #plt.tight_layout()
-    plt.savefig(f"plot10.png", dpi=300)
+    plt.savefig(f"plotx.png", dpi=300)
     plt.show()
 
 
