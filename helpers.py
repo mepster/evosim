@@ -60,3 +60,23 @@ def timeit(func):
         timeit_depth -= 1
         return result
     return wrapper
+
+import sys
+def assertx(cond, msg=None, show_stack=False):
+    """
+    Like `assert`, but the third argument controls whether an unhandled
+    AssertionError prints a traceback.
+    Usage: assertx(a == b, "a not equal b", False)
+    """
+    import sys
+
+    if cond:
+        return
+
+    if show_stack:
+        # behave like usual - raise an AssertionError (will show traceback if uncaught)
+        raise AssertionError(msg)
+    else:
+        # print a single-line error and exit without printing a traceback
+        sys.stderr.write(f"\nError: {msg}\n\n")
+        sys.exit(1)

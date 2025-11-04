@@ -170,7 +170,7 @@ class Grid():
         self.numClades = args['numClades']
         self.mode = args['mode'] # 'mutation' or 'migration
         self.skipMutation = args['skipMutation']
-        self.print_each_epoch = args['print_each_epoch']
+        self.print_stats = args['print_stats']
 
         s = args['s']
         aToB = args['aToB']
@@ -243,7 +243,7 @@ class Grid():
         # swap environment every epochGen generations
         if (gen % epochGen == 0):
             # at the start of each epoch
-            if self.print_each_epoch:
+            if self.print_stats:
                 print(f"gen:{gen} epoch:{int(gen / epochGen)}")# envt:{envt}")
                 #print(f"swap environment to {'A' if self.pops[0].env.idx == 1 else 'B'}")
             
@@ -251,7 +251,7 @@ class Grid():
                 # swap environment in each pop
                 pop.env.swap(gen)
 
-            if self.print_each_epoch:
+            if self.print_stats:
                 print(self) # start of every epoch
 
         # the mode is fixed for each run - either 'mutation' or 'migration'
@@ -277,8 +277,8 @@ class Grid():
             raise Exception(f"invalid mode: {self.mode}")
 
 
-default_args = DotAccessibleDict({'numPops': 1, 'N': 1e9, 'minMu':2, 'numClades': 1, 'aToB': 0.5, 'numEpochs':1, 'T':1e3, \
-                's':0.1, 'skipMutation': False, 'plotLog': False, 'plotAB': True, 'print_each_epoch': True})
+default_args = DotAccessibleDict({'numPops': 1, 'N': 1e5, 'minMu':2, 'numClades': 1, 'aToB': 0.5, 'T':1e3, 'numEpochs':1, \
+                's':0.1, 'skipMutation': False, 'plotLog': False, 'plotAB': True, 'print_stats': False})
 
 
 #@timeit
@@ -286,13 +286,16 @@ def evosim(override_args=DotAccessibleDict()):
     global default_args
     # numPops: number of populations
     # N: maximum population size (N <0 means infinite pop)
-    # s: selection coefficient
     # minMu: minimum mutator allele (2 means M2, 3 means M
     # numClades: number of clades (mutator alleles). Mutation rates are 10^-minMu, 10^-(minMu+1), ... 10^-(minMu+numClades-1)
     # aToB: initial fraction of A genotype
-    # numEpochs: number of epochs
     # T: number of generations per epoch
-    # mode: 'mutation' or 'migration' - whether to simulate mutation within one pop, or migration between multiple pops
+    # numEpochs: number of epochs
+    # s: selection coefficient
+    # skipMutation: if True, skip mutation step
+    # plotLog: if True, use log scale for plots
+    # plotAB: if True, plot A and B genotypes separately; if False, plot total (A+B)
+    # print_stats: if True, print grid stats at start of each epoch
 
     #print("user_args:", user_args)
     #print("default_args:", default_args)
@@ -314,11 +317,12 @@ def evosim(override_args=DotAccessibleDict()):
     aToB = args.aToB
 
     # check constraints on arguments
-    assert N <0 or N >=10, "N must be <0 (which means infinite pop) or >=10"
-    assert minMu >=2 and minMu <=8, "minMu must be between 2 and 8"
-    assert numClades >=1 and minMu+numClades <=9, "numClades must be >= 1, and minMu+numClades must be <=9"
-    assert (numPops >= 1), "numPops must be 1 for mutation mode, or >=1 for migration mode"
-    assert (aToB >= 0 and aToB <= 1.0), "aToB must be between 0.0 and 1.0"
+    assertx(N <0 or N >=10, "N must be <0 (which means infinite pop) or >=10")
+    assertx(N <= 1e9, "N must be <= 1e9")
+    assertx(minMu >=2 and minMu <=8, "minMu must be between 2 and 8")
+    assertx(numClades >=1 and minMu+numClades <=9, "numClades must be >= 1, and minMu+numClades must be <=9")
+    assertx(numPops >= 1, "numPops must be 1 for mutation mode, or >=1 for migration mode")
+    assertx((aToB >= 0 and aToB <= 1.0), "aToB must be between 0.0 and 1.0")
     args['mode'] = 'mutation' if args['numPops'] == 1 else 'migration' # might change this later
 
     if N>0:
@@ -334,7 +338,7 @@ def evosim(override_args=DotAccessibleDict()):
     
     grid = Grid(args)
 
-    for gen in range(int(numEpochs*T+1)):
+    for gen in range(int(numEpochs*T)):
         grid.one_gen(gen, T)
 
     ## plot simulation
@@ -342,7 +346,7 @@ def evosim(override_args=DotAccessibleDict()):
     strN = "Inf" if N < 0 else f"{e_format(N)}"
     colors = [col.ColorConverter.to_rgb(x) for x in ["red", "green", "blue", "magenta", "cyan", "#ff9933", "black"]]
 
-    fig, axes = plt.subplots(numPops, layout='constrained', figsize=(6.4, numPops*4.8)) # 6.4x4.8.
+    fig, axes = plt.subplots(numPops, layout='constrained', figsize=(8.0, numPops*4.0)) # 6.4x numPops*4.8.
     if numPops == 1: axes = [axes]
     fig.suptitle(f"N={strN}, s={e_format(s)}, T={e_format(T)}")
 
@@ -362,17 +366,17 @@ def evosim(override_args=DotAccessibleDict()):
                 if args.plotAB:
                     handles.append(ax.plot(clade.countsA, color=shades[1], linestyle="-")[0])
                     labels.append(r"$\mathit{M}_{{%d}},A$" % (clade.m + minMu))
-                    handles.append(ax.plot(clade.countsB, color=shades[2], linestyle=":")[0])
+                    handles.append(ax.plot(clade.countsB, color=shades[3], linestyle=":")[0])
                     labels.append(r"$\mathit{M}_{{%d}},B$" % (clade.m + minMu))
                 else:
-                    handles.append(ax.plot(clade.counts, color=shades[1], linestyle="-")[0]) # note [0]
+                    handles.append(ax.plot(clade.counts, color=shades[2], linestyle="-")[0]) # note [0]
                     labels.append(r"$\mathit{M}_{{%d}},(A+B)$" % (clade.m + minMu))
             else:
                 if args.plotAB:
                     ax.plot(clade.countsA, color=shades[1], linestyle="-")
-                    ax.plot(clade.countsB, color=shades[2], linestyle=":")
+                    ax.plot(clade.countsB, color=shades[3], linestyle=":")
                 else:
-                    ax.plot(clade.counts, color=shades[1], linestyle="-")
+                    ax.plot(clade.counts, color=shades[2], linestyle="-")
         ax.locator_params(axis='x', nbins=5)  # just put 5 major tics
         
         # formats y axis labels nicely
