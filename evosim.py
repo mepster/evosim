@@ -271,6 +271,7 @@ class Grid():
 default_args = DotAccessibleDict({'numPops': 1, 'N': 1e9, 'minMu':2, 'numClades': 1, 'aToB': 0.5, 'numEpochs':1, 'T':1e3, \
                 's':0.1, 'skipMutation': False, 'plotLog': False, 'plotAB': True, 'print_each_epoch': True})
 
+@timeit
 def evosim(override_args=DotAccessibleDict()):
     global default_args
     # numPops: number of populations
@@ -405,7 +406,7 @@ def evosim(override_args=DotAccessibleDict()):
     #ax.plot(grid.pops[0].envs)
 
     plt.figlegend(handles=handles, labels=labels, loc='outside right center')
-    plt.tight_layout()
+    #plt.tight_layout()
     #plt.savefig(f"output/plotx.png", dpi=300)
     plt.show()
 

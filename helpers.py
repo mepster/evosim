@@ -42,3 +42,21 @@ class DotAccessibleDict(dict):
 
     def copy(self):
         return DotAccessibleDict(super().copy())
+    
+import functools
+import termcolor
+import time
+timeit_depth = 0
+def timeit(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        global timeit_depth
+        timeit_depth += 1
+        print(termcolor.colored(f"{'=== ' * timeit_depth}Starting {func.__name__}", "green"))
+        start = time.time()
+        result = func(*args, **kwargs)
+        elapsed = time.time() - start
+        print(termcolor.colored(f"{'=== ' * timeit_depth}Elapsed time for {func.__name__}: {elapsed:.2f} seconds", "red"))
+        timeit_depth -= 1
+        return result
+    return wrapper
