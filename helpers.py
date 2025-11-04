@@ -12,10 +12,33 @@ def e_format(num, m=1, e=1, signFlag=False):
     sign = ('+' if signFlag else '') if exponent>=0 else '-'
     return f"{mantissa}e{sign}{abs(exponent):0>{e}}"
 
-from collections import UserDict
-class DotAccessibleDict(UserDict):
+class DotAccessibleDict(dict):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        if args:
+            if len(args) > 1:
+                raise TypeError("Expected at most one positional argument")
+            self.update(args[0])
+        if kwargs:
+            self.update(kwargs)
+
     def __getattr__(self, key):
         try:
             return self[key]
         except KeyError:
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{key}'")
+
+    def __setattr__(self, key, value):
+        if key.startswith('_'):
+            super().__setattr__(key, value)
+        else:
+            self[key] = value
+
+    def __delattr__(self, key):
+        try:
+            del self[key]
+        except KeyError:
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{key}'")
+
+    def copy(self):
+        return DotAccessibleDict(super().copy())

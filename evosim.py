@@ -12,7 +12,7 @@ class Environment():
         self.active_env = [] # pairs of (gen, env)
 
     def __repr__(self):
-        return f"idx:{self.idx} sA:{self.sA} sB:{self.sB}"
+        return f"{"A" if self.idx == 0 else "B"}\tsA:{self.sA}\tsB:{self.sB}"
 
     def swap(self, gen): # swap which allele is favored
         self.idx = (self.idx+1)%2
@@ -34,7 +34,7 @@ class Clade:
 
         self.m = m # m is 0, 1, 2, ... for clades labelled M2, M3, M4, ...
         self.mu = 10.0**(-1.0 * (m+minMu)) # mutation rate
-        self.label = f"m{m+minMu}" # clade labels M2, M3, M4, ... for printing
+        self.label = f"M{m+minMu}" # clade labels M2, M3, M4, ... for printing
 
         fracA = 1.0 / numClades * aToB  # initial fraction of A genotype
         fracB = 1.0 / numClades * (1.0 - aToB) # initial fraction of B genotype
@@ -58,7 +58,7 @@ class Clade:
     def __repr__(self):
         # for printing clade info in pretty format
         ret = ""
-        ret = ret + f"mu:{self.mu:.2e} nA: {self.nA:10.2f} nB:{self.nB:10.2f}, (n:{self.nA+self.nB:10.2f})"
+        ret = ret + f"mu:{self.mu:10.1e}\tnA: {self.nA:10.1f},\tnB:{self.nB:10.1f},\t(n:{self.nA+self.nB:10.1f})"
         return ret
 
     def select(self, env):
@@ -120,10 +120,10 @@ class Pop:
         # for printing population info in pretty format
         ret = ""
         # this includes printing each clade
+        ret = ret + f"\tenv: {self.env}\n"
+        ret = ret + f"\tsumN: {self.sumN():.2f}\n"
         for idx, clade in enumerate(self.clades):
-            ret = ret + f"  clade {clade.label}: {clade}\n"
-        ret = ret + f"  sumN: {self.sumN():10.2f}\n"
-        ret = ret + f"  env: {self.env}\n"
+            ret = ret + f"\tclade {clade.label}: {clade}\n"
         return ret
 
     def sumN(self): # counts individuals in this population
@@ -165,6 +165,8 @@ class Grid():
         self.numClades = args['numClades']
         self.mode = args['mode'] # 'mutation' or 'migration
         self.skipMutation = args['skipMutation']
+        self.print_each_epoch = args['print_each_epoch']
+
         s = args['s']
         aToB = args['aToB']
 
@@ -231,10 +233,9 @@ class Grid():
     def one_gen(self, gen, epochGen):
         # one generation of evolution for the whole grid
         # swap environment every epochGen generations
-        print_each_gen = False
         if (gen % epochGen == 0):
             # at the start of each epoch
-            if print_each_gen:
+            if self.print_each_epoch:
                 print(f"gen:{gen} epoch:{int(gen / epochGen)}")# envt:{envt}")
                 print(f"swap environment to {'A' if self.pops[0].env.idx == 1 else 'B'}")
             
@@ -242,7 +243,7 @@ class Grid():
                 # swap environment in each pop
                 pop.env.swap(gen)
 
-            if print_each_gen:
+            if self.print_each_epoch:
                 print(self) # start of every epoch
 
         # the mode is fixed for each run - either 'mutation' or 'migration'
@@ -267,8 +268,8 @@ class Grid():
         else:
             raise Exception(f"invalid mode: {self.mode}")
 
-default_args = {'numPops': 1, 'N': 1e9, 's':0.1, 'minMu':2, 'numClades': 3, 'aToB': 0.5, 'numEpochs':10, 'T':1e3, \
-                'skipMutation': False, 'plotLog': False, 'plotAB': False}
+default_args = DotAccessibleDict({'numPops': 1, 'N': 1e9, 'minMu':2, 'numClades': 1, 'aToB': 0.5, 'numEpochs':1, 'T':1e3, \
+                's':0.1, 'skipMutation': False, 'plotLog': False, 'plotAB': True, 'print_each_epoch': True})
 
 def evosim(override_args=DotAccessibleDict()):
     global default_args
@@ -304,14 +305,18 @@ def evosim(override_args=DotAccessibleDict()):
     # check constraints on arguments
     assert N <0 or N >=10, "N must be <0 (which means infinite pop) or >=10"
     assert minMu >=2 and minMu <=8, "minMu must be between 2 and 8"
-    assert numClades >=1 and numClades <=7, "numClades must be between 1 and 7"
+    assert numClades >=1 and minMu+numClades <=9, "numClades must be >= 1, and minMu+numClades must be <=9"
     assert (numPops >= 1), "numPops must be 1 for mutation mode, or >=1 for migration mode"
     assert (aToB >= 0 and aToB <= 1.0), "aToB must be between 0.0 and 1.0"
     args['mode'] = 'mutation' if args['numPops'] == 1 else 'migration' # might change this later
 
-    print(f"sT:{s*T} is low (<= 5.0)" if s*T <= 5.0 else f"sT:{s*T} > 5.0")
     if N>0:
-        print(f"Ns:{N*s} is low (<= 1.0)" if N*s <= 1.0 else f"Ns:{N*s} > 1.0")
+        Ns = abs(N*s)
+        print(f"Ns:{Ns} is low < 10.0 (selection is WEAK relative to drift)" if Ns < 10.0 else f"Ns:{Ns} >= 10.0 (selection is STRONG relative to drift)")
+    else:
+        print(f"Infinite population size N (there is no drift)")
+    sT = abs(s*T)
+    print(f"sT:{sT} is low < 20.0 (fixation WON'T usually happen in one epoch)" if sT < 20.0 else f"sT:{sT} >= 20.0 (fixation CAN happen in one epoch (ignoring mutation))")
 
 
     ## run simulation
@@ -324,7 +329,7 @@ def evosim(override_args=DotAccessibleDict()):
     ## plot simulation
 
     strN = "Inf" if N < 0 else f"{e_format(N)}"
-    colors = [col.ColorConverter.to_rgb(x) for x in ["red", "green", "blue", "magenta", "cyan", "yellow", "black"]]
+    colors = [col.ColorConverter.to_rgb(x) for x in ["red", "green", "blue", "magenta", "cyan", "#ff9933", "black"]]
 
     fig, axes = plt.subplots(numPops, layout='constrained', figsize=(6.4, numPops*4.8)) # 6.4x4.8.
     if numPops == 1: axes = [axes]
@@ -339,24 +344,24 @@ def evosim(override_args=DotAccessibleDict()):
     for idx, pop in enumerate(grid.pops):
         ax = axes[idx]
         for idx2, clade in enumerate(pop.clades):
-            # Fixed colors: M2 is red, M3 is green, M4 is blue, M5 is magenta, M6 is cyan, M7 is yellow, 
-            # darker shade for allele A, lighter shade for allele a
+            # Fixed colors: M2 is red, M3 is green, M4 is blue, M5 is magenta, M6 is cyan, M7 is orange, 
+            # darker shade for allele A, lighter shade for allele B
             shades = [scale_lightness(colors[clade.m + minMu - 2], scale) for scale in [0.5, .75, 1., 1.25, 1.5]]
             if idx==0: # with handles and labels
                 if args.plotAB:
-                    handles.append(ax.plot(clade.countsA, color=shades[2], linestyle="-")[0])
+                    handles.append(ax.plot(clade.countsA, color=shades[1], linestyle="-")[0])
                     labels.append(r"$\mathit{M}_{{%d}},A$" % (clade.m + minMu))
-                    handles.append(ax.plot(clade.countsB, color=shades[4], linestyle=":")[0])
+                    handles.append(ax.plot(clade.countsB, color=shades[2], linestyle=":")[0])
                     labels.append(r"$\mathit{M}_{{%d}},B$" % (clade.m + minMu))
                 else:
-                    handles.append(ax.plot(clade.counts, color=shades[3], linestyle="-")[0]) # note [0]
+                    handles.append(ax.plot(clade.counts, color=shades[1], linestyle="-")[0]) # note [0]
                     labels.append(r"$\mathit{M}_{{%d}},(A+B)$" % (clade.m + minMu))
             else:
                 if args.plotAB:
-                    ax.plot(clade.countsA, color=shades[2], linestyle="-")
-                    ax.plot(clade.countsB, color=shades[4], linestyle=":")
+                    ax.plot(clade.countsA, color=shades[1], linestyle="-")
+                    ax.plot(clade.countsB, color=shades[2], linestyle=":")
                 else:
-                    ax.plot(clade.counts, color=shades[3], linestyle="-")
+                    ax.plot(clade.counts, color=shades[1], linestyle="-")
         ax.locator_params(axis='x', nbins=5)  # just put 5 major tics
         
         # formats y axis labels nicely
@@ -375,11 +380,11 @@ def evosim(override_args=DotAccessibleDict()):
         if ylog:
             ax.set_yscale("log", nonpositive='mask')
             if N<0: # for infinite pop
-                ax.set_ylim(1e-8, 1.0)
+                ax.set_ylim(1e-8, 1.5)
             else: 
                 ax.set_ylim(N*1e-6, 1.5*N)
         else:
-            ax.set_ylim(0, abs(N))
+            ax.set_ylim(-0.001*abs(N), 1.005*abs(N))
         for swap_gen, env_idx in pop.env.active_env:
             ax.axvline(x=swap_gen+(1 if xlog else 0), color='gray', linestyle='--', linewidth=1)
             label = 'A' if env_idx == 'A' else 'B'
@@ -400,8 +405,8 @@ def evosim(override_args=DotAccessibleDict()):
     #ax.plot(grid.pops[0].envs)
 
     plt.figlegend(handles=handles, labels=labels, loc='outside right center')
-    #plt.tight_layout()
-    plt.savefig(f"output/plotx.png", dpi=300)
+    plt.tight_layout()
+    #plt.savefig(f"output/plotx.png", dpi=300)
     plt.show()
 
 
