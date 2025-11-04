@@ -366,7 +366,7 @@ def main():
 
     plt.figlegend(handles=handles, labels=labels, loc='outside right center')
     #plt.tight_layout()
-    plt.savefig(f"plotx.png", dpi=300)
+    plt.savefig(f"output/plotx.png", dpi=300)
     plt.show()
 
 
