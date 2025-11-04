@@ -20,13 +20,13 @@ class Environment():
         self.sB = tmp
 
         # log data for plotting
-        self.active_env.append((gen, self.idx))
+        self.active_env.append((gen, "A" if self.idx == 0 else "B"))
 
 class Clade:
     # a clade contains two genotypes: A and B, with the same fixed mutation rate
     def __init__(self, m, args):
         # initialize one clade
-        maxN = args['maxN']
+        popSize = args['popSize']
         aToB = args['aToB']
         numClades = args['numClades']
         minMu = args['minMu']
@@ -37,11 +37,11 @@ class Clade:
 
         fracA = 1.0 / numClades * aToB  # initial fraction of A genotype
         fracB = 1.0 / numClades * (1.0 - aToB) # initial fraction of B genotype
-        if maxN < 0:  # infinite pop - floating point "frequency" of each genotype
+        if popSize < 0:  # infinite pop - floating point "frequency" of each genotype
             self.nA = fracA
             self.nB = fracB
         else: # finite pop - integer count of each genotype
-            self.nA, self.nB = binom.rvs(n=round(maxN), p=[fracA, fracB])
+            self.nA, self.nB = binom.rvs(n=round(popSize), p=[fracA, fracB])
 
         # for logging of the counts of the 2 genotypes within the clade over time
         self.countsA = []
@@ -62,13 +62,13 @@ class Clade:
 
     def select(self, env):
         # apply selection, in frequency space
-        # nA and nB in each clade are non-integer after this, and sumN != maxN
+        # nA and nB in each clade are non-integer after this, and sumN != popSize
         self.nA = self.nA*(1.0+env.sA)
         self.nB = self.nB*(1.0+env.sB)
 
     def mutate(self):
         # apply mutation, in frequency space
-        # nA and nB in each clade are non-integer after this, and sumN != maxN
+        # nA and nB in each clade are non-integer after this, and sumN != popSize
         aToB = self.nA*self.mu
         AtoA = self.nA*(1.0-self.mu)
         BtoA = self.nB*self.mu
@@ -77,27 +77,26 @@ class Clade:
         self.nA = AtoA + BtoA
         self.nB = aToB + BtoB
 
-    def normalize(self, sumN, maxN):
+    def normalize(self, sumN, popSize):
         # convert from frequency space back to integer counts
-        #print(f"sumN:{sumN} maxN:{maxN}")
         fracA = float(self.nA) / sumN # fraction of A
         fracB = float(self.nB) / sumN # fraction of B
-        if maxN < 0: # this means it's an infinite pop
+        if popSize < 0: # this means it's an infinite pop
             # infinite pop - don't convert to integer
             self.nA = fracA # total N of this type
             self.nB = fracB # total N of this type
         else:
             # finite pop - convert to integer
             # save computing binom if frac is 0.0 anyway, just set count to 0
-            self.nA = 0 if fracA == 0.0 else binom.rvs(n=round(maxN), p=fracA) # total N of this type
-            self.nB = 0 if fracB == 0.0 else binom.rvs(n=round(maxN), p=fracB) # total N of this type
+            self.nA = 0 if fracA == 0.0 else binom.rvs(n=round(popSize), p=fracA) # total N of this type
+            self.nB = 0 if fracB == 0.0 else binom.rvs(n=round(popSize), p=fracB) # total N of this type
 
 
 class Pop:
     # a population contains multiple clades
     def __init__(self, args):
         # initialize one population
-        self.maxN = args['maxN']
+        self.popSize = args['popSize']
         self.env = args['env']
         numClades = args['numClades']
 
@@ -130,24 +129,24 @@ class Pop:
         sumN = 0.0
         for clade in self.clades:
             sumN = sumN + (clade.nA + clade.nB)
+        assert sumN > 0.0, f"uh oh, sumN for a population should be > 0. Probably popSize {self.popSize} is too small."
         return sumN
 
     def select(self):
-        # nA and nB in each clade are frequencies after this, and sum != maxN
+        # nA and nB in each clade are frequencies after this, and sum != popSize
         for clade in self.clades:
             clade.select(self.env)
 
     def mutate(self):
-        # nA and nB in each clade are frequencies after this, and sum != maxN
+        # nA and nB in each clade are frequencies after this, and sum != popSize
         for clade in self.clades:
             clade.mutate()
 
     def normalize(self):
         # convert from frequency space back to integer counts
         sumN = self.sumN()
-        # normalize each clade
         for clade in self.clades:
-            clade.normalize(sumN, self.maxN)
+            clade.normalize(sumN, self.popSize)
 
     # def one_gen_with_mutation(self, gen):
     #     self.update_gen_data()
@@ -259,46 +258,64 @@ class Grid():
         else:
             raise Exception(f"invalid mode: {self.mode}")
 
-def main():
-    maxN = 1e6 # maxN < 0 means infinite pop
-    numEpochs = 1
-    T = 1e5
-    s = 0.1 # 10./T
+def evosim(user_args={}):
+    # numPops: number of populations
+    # popSize: maximum population size (popSize <0 means infinite pop)
+    # s: selection coefficient
+    # minMu: minimum mutator allele (2 means M2, 3 means M
+    # numClades: number of clades (mutator alleles). Mutation rates are 10^-minMu, 10^-(minMu+1), ... 10^-(minMu+numClades-1)
+    # aToB: initial fraction of A genotype
+    # numEpochs: number of epochs
+    # T: number of generations per epoch
+    # mode: 'mutation' or 'migration' - whether to simulate mutation within one pop, or migration between multiple pops
 
-    if True:
-        mode = 'mutation'
-        numPops = 1
-    else:
-        mode = 'migration'
-        numPops = 2
+    default_args = {'numPops': 1, 'popSize': 1e9, 's':0.1, 'minMu':2, 'numClades': 3, 'aToB': 0.0, 'numEpochs':10, 'T':1e5}
+    default_args['mode'] = 'mutation' if default_args['numPops'] == 1 else 'migration'
 
-    minMu = 2;     assert 2 <= minMu and minMu <= 8
-    numClades = 3; assert 3 <= minMu+numClades and minMu+numClades <= 9 
+    print("user_args:", user_args)
+    print("default_args:", default_args)
+    # merge args with default_args, overriding default_args
+    unknown_keys = set(user_args.keys()) - set(default_args.keys())
+    if unknown_keys:
+        raise KeyError(f"Unknown argument keys: {sorted(unknown_keys)}")
+    args = default_args.copy()
+    args.update(user_args)
+    print("merged_args:", args)
 
-    # starting ratio of A to a (aka B) in each clade
-    aToB = 0.0
-    #aToB = 0.5
+    popSize = args['popSize']
+    numPops = args['numPops']
+    minMu = args['minMu']
+    mode = args['mode']
+    numClades = args['numClades']
+    s = args['s']
+    T = args['T']
+    numEpochs = args['numEpochs']
 
-    args = {'numPops': numPops, 'numClades': numClades, 'maxN': maxN, 's':s, 'aToB': aToB, 'minMu':minMu, 'mode':mode}
+    xlog = False
+    ylog = False
+
+    # check constraints on arguments
+    assert popSize <0 or popSize >=10, "popSize must be <0 (which means infinite pop) or >=10"
+    assert minMu >=2 and minMu <=8, "minMu must be between 2 and 8"
+    assert numClades >=2 and numClades <=9, "numClades must be between 2 and 9"
+    assert mode in ['mutation', 'migration'], "mode must be 'mutation' or 'migration'"
+    assert ((numPops == 1 and mode=='mutation') \
+        or (numPops >=1)), "numPops must be 1 for mutation mode, or >=1 for migration mode"
+    if s*T<5.0:
+        print(f"s {s} is pretty small for given T {T} (sT should be >=5.0)")
+    print(f"sT:{s*T:.1f}")
+    if popSize>0 and s>0: print(f"Ns:{e_format(popSize*s)}")  
+
+    ## run simulation
+    
     grid = Grid(args)
 
     for gen in range(int(numEpochs*T)):
         grid.one_gen(gen, T)
-    print()
 
-    # check sT and N/s
-    sT = round(s*T, 2)
-    if sT<5.0:
-        print(f"*** LOW sT:{sT:.1f}")
-    else:
-        print(f"sT:{sT:.1f}")
-    #if maxN>1: print(f"N/s:{e_format(maxN/s)}")
+    ## plot simulation
 
-    print("mode:", args['mode'])
-
-    ## plots
-
-    strN = "Inf" if maxN < 0 else f"{e_format(maxN)}"
+    strN = "Inf" if popSize < 0 else f"{e_format(popSize)}"
     colors = [col.ColorConverter.to_rgb(x) for x in ["red", "green", "blue", "magenta", "cyan", "yellow", "black"]]
 
     fig, axes = plt.subplots(numPops, layout='constrained', figsize=(6.4, numPops*4.8)) # 6.4x4.8.
@@ -315,16 +332,16 @@ def main():
         for idx2, clade in enumerate(pop.clades):
             # Fixed colors: M2 is red, M3 is green, M4 is blue, M5 is magenta, M6 is cyan, M7 is yellow, 
             # darker shade for allele A, lighter shade for allele a
-            shades = [scale_lightness(colors[clade.m + args['minMu'] - 2], scale) for scale in [0.5, .75, 1., 1.25, 1.5]]
+            shades = [scale_lightness(colors[clade.m + minMu - 2], scale) for scale in [0.5, .75, 1., 1.25, 1.5]]
             if idx==0: # with handles and labels
                 if plot_total:
                     handles.append(ax.plot(clade.counts, color=shades[3], linestyle="-")[0]) # note [0]
-                    labels.append(r"$\mathit{M}_{{%d}},(A+a)$" % (clade.m + args['minMu']))
+                    labels.append(r"$\mathit{M}_{{%d}},(A+a)$" % (clade.m + minMu))
                 else:
                     handles.append(ax.plot(clade.countsA, color=shades[2], linestyle="-")[0])
-                    labels.append(r"$\mathit{M}_{{%d}},A$" % (clade.m + args['minMu']))
+                    labels.append(r"$\mathit{M}_{{%d}},A$" % (clade.m + minMu))
                     handles.append(ax.plot(clade.countsB, color=shades[4], linestyle=":")[0])
-                    labels.append(r"$\mathit{M}_{{%d}},a$" % (clade.m + args['minMu']))
+                    labels.append(r"$\mathit{M}_{{%d}},a$" % (clade.m + minMu))
             else:
                 if plot_total:
                     ax.plot(clade.counts, color=shades[3], linestyle="-")
@@ -333,24 +350,22 @@ def main():
                     ax.plot(clade.countsB, color=shades[4], linestyle=":")
         ax.locator_params(axis='x', nbins=5)  # just put 5 major tics
         
-        xlog = True
         if xlog:
             ax.set_xscale("log", nonpositive='mask')
 
-        ylog = True
         if ylog:
             ax.set_yscale("log", nonpositive='mask')
-            if maxN<0: # for infinite pop
+            if popSize<0: # for infinite pop
                 ax.set_ylim(1e-8, 1.0)
             else: 
-                ax.set_ylim(maxN*1e-6, 1.5*maxN)
+                ax.set_ylim(popSize*1e-6, 1.5*popSize)
         for swap_gen, env_idx in pop.env.active_env:
             ax.axvline(x=swap_gen+(1 if xlog else 0), color='gray', linestyle='--', linewidth=1)
-            label = 'A' if env_idx == 0 else 'a'
+            label = 'A' if env_idx == 'A' else 'B'
             y_pos = ax.get_ylim()[1]
             ax.text(swap_gen+(1 if xlog else 0), y_pos, label, color='gray', ha='center', va='bottom', fontsize=10)
 
-        plt.ylabel("N" if maxN>0 else "frequency")
+        plt.ylabel("N" if popSize>0 else "frequency")
         plt.xlabel("generations")
         [axes[idx].tick_params(labelbottom=False) for idx in range(numPops-1)]
 
@@ -371,4 +386,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    evosim()
