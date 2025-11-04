@@ -18,48 +18,56 @@ class Environment():
         tmp = self.sA
         self.sA = self.sB
         self.sB = tmp
-        self.active_env.append((gen, self.idx)) # record that at generation gen we swapped to env idx
+
+        # log data for plotting
+        self.active_env.append((gen, self.idx))
 
 class Clade:
+    # a clade contains two genotypes: A and B, with the same fixed mutation rate
     def __init__(self, m, args):
+        # initialize one clade
         maxN = args['maxN']
         aToB = args['aToB']
         numClades = args['numClades']
         minMu = args['minMu']
 
-        self.m = m
-        self.mu = 10.0**(-1.0 * (m+minMu))
-        self.label = f"m{m+minMu}"
+        self.m = m # m is 0, 1, 2, ... for clades labelled M2, M3, M4, ...
+        self.mu = 10.0**(-1.0 * (m+minMu)) # mutation rate
+        self.label = f"m{m+minMu}" # clade labels M2, M3, M4, ... for printing
 
-        fracA = 1.0 / numClades * aToB 
-        fracB = 1.0 / numClades * (1.0 - aToB) 
-        if maxN < 0:  # infinite pop
+        fracA = 1.0 / numClades * aToB  # initial fraction of A genotype
+        fracB = 1.0 / numClades * (1.0 - aToB) # initial fraction of B genotype
+        if maxN < 0:  # infinite pop - floating point "frequency" of each genotype
             self.nA = fracA
             self.nB = fracB
-        else:
+        else: # finite pop - integer count of each genotype
             self.nA, self.nB = binom.rvs(n=round(maxN), p=[fracA, fracB])
 
+        # for logging of the counts of the 2 genotypes within the clade over time
         self.countsA = []
         self.countsB = []
         self.counts = []
 
     def update_gen_data(self):
-        self.countsA.append(self.nA)
-        self.countsB.append(self.nB)
-        self.counts.append(self.nA+self.nB)
+        # log the counts of the 2 genotypes within the clade
+        self.countsA.append(self.nA) # A genotype
+        self.countsB.append(self.nB) # B genotype
+        self.counts.append(self.nA+self.nB) # total
 
     def __repr__(self):
+        # for printing clade info in pretty format
         ret = ""
-        ret = ret + f"nA: {self.nA:10.2f} nB:{self.nB:10.2f}, (n:{self.nA+self.nB:10.2f}) \
-            mu:{self.mu:.2e}"
+        ret = ret + f"mu:{self.mu:.2e} nA: {self.nA:10.2f} nB:{self.nB:10.2f}, (n:{self.nA+self.nB:10.2f})"
         return ret
 
     def select(self, env):
+        # apply selection, in frequency space
         # nA and nB in each clade are non-integer after this, and sumN != maxN
         self.nA = self.nA*(1.0+env.sA)
         self.nB = self.nB*(1.0+env.sB)
 
     def mutate(self):
+        # apply mutation, in frequency space
         # nA and nB in each clade are non-integer after this, and sumN != maxN
         aToB = self.nA*self.mu
         AtoA = self.nA*(1.0-self.mu)
@@ -69,25 +77,31 @@ class Clade:
         self.nA = AtoA + BtoA
         self.nB = aToB + BtoB
 
-    def normalize(self, sumN, sumR, maxN):
-        #print(f"sumN:{sumN} sumR:{sumR}")
-        fracA = float(self.nA) / sumR # fraction of total resource this type gets
-        fracB = float(self.nB) / sumR # fraction of total resource this type gets
-        if maxN < 0: # infinite pop
+    def normalize(self, sumN, maxN):
+        # convert from frequency space back to integer counts
+        #print(f"sumN:{sumN} maxN:{maxN}")
+        fracA = float(self.nA) / sumN # fraction of A
+        fracB = float(self.nB) / sumN # fraction of B
+        if maxN < 0: # this means it's an infinite pop
+            # infinite pop - don't convert to integer
             self.nA = fracA # total N of this type
             self.nB = fracB # total N of this type
         else:
-            # save computing binom if frac is 0.0 anyway
+            # finite pop - convert to integer
+            # save computing binom if frac is 0.0 anyway, just set count to 0
             self.nA = 0 if fracA == 0.0 else binom.rvs(n=round(maxN), p=fracA) # total N of this type
             self.nB = 0 if fracB == 0.0 else binom.rvs(n=round(maxN), p=fracB) # total N of this type
 
 
 class Pop:
+    # a population contains multiple clades
     def __init__(self, args):
+        # initialize one population
         self.maxN = args['maxN']
         self.env = args['env']
         numClades = args['numClades']
 
+        # the list of clades in this population
         self.clades = []
         for m in range(0, numClades):
             clade = Clade(m, args)
@@ -97,48 +111,43 @@ class Pop:
         # self.clades.append(clade)
 
     def update_gen_data(self):
+        # for each clade, log its data for this generation
         for clade in self.clades:
             clade.update_gen_data()
-        # update the Pop's own data here
+        # update the Pop's own data here, if any
 
     def __repr__(self):
+        # for printing population info in pretty format
         ret = ""
+        # this includes printing each clade
         for idx, clade in enumerate(self.clades):
             ret = ret + f"  clade {clade.label}: {clade}\n"
-        ret = ret + f"  sumR: {self.sumR():10.2f}\n"
         ret = ret + f"  sumN: {self.sumN():10.2f}\n"
         ret = ret + f"  env: {self.env}\n"
         return ret
 
-    def sumR(self): # to sum in terms of resources
-        sumR = 0.0
-        for clade in self.clades:
-            sumR = sumR + (clade.nA + clade.nB)
-        return sumR
-
-    def sumN(self): # counts individuals, ignoring resources
+    def sumN(self): # counts individuals in this population
         sumN = 0.0
         for clade in self.clades:
             sumN = sumN + (clade.nA + clade.nB)
         return sumN
 
     def select(self):
-        # nA and nB in each clade are non-integer after this, and sum != maxN
+        # nA and nB in each clade are frequencies after this, and sum != maxN
         for clade in self.clades:
             clade.select(self.env)
 
     def mutate(self):
-        # nA and nB in each clade are non-integer after this, and sum != maxN
+        # nA and nB in each clade are frequencies after this, and sum != maxN
         for clade in self.clades:
             clade.mutate()
 
     def normalize(self):
+        # convert from frequency space back to integer counts
         sumN = self.sumN()
-        sumR = self.sumR()
-        #print(f"BEFORE sumR:{self.sumR()}")
+        # normalize each clade
         for clade in self.clades:
-            clade.normalize(sumN, sumR, self.maxN)
-        #print(f"AFTER sumR:{self.sumR()}")
+            clade.normalize(sumN, self.maxN)
 
     # def one_gen_with_mutation(self, gen):
     #     self.update_gen_data()
@@ -148,7 +157,10 @@ class Pop:
 
 
 class Grid():
+    # A grid contains multiple populations
+    # The point is that you can have migration between populations
     def __init__(self, args):
+        # initialize the grid of populations (there is only one grid per run)
         self.numPops = args['numPops']
         self.numClades = args['numClades']
         self.mode = args['mode'] # 'mutation' or 'migration
@@ -167,17 +179,20 @@ class Grid():
             self.pops.append(pop)
 
     def __repr__(self):
+        # for printing the grid info in pretty format
         ret = ""
+        # this includes printing each population
         for idx, pop in enumerate(self.pops):
             ret = ret + f" pop {idx}:\n{pop}"
         return ret
 
     def migrate(self):
-        if self.numPops == 1: # no migration
+        # apply migration between populations - in frequency space
+        if self.numPops == 1: # there's just one population, skip migration
             return
 
-        # for each pop, accumulate inbound and outbound counts of each type
-        # there are numPops * numClades * numTypes distinct counts. For each pop, numClades clades. For each clade, numTypes types (A and B).
+        # For each pop, accumulate inbound and outbound counts of each type, in frequency space
+        # There are numPops * numClades * numTypes distinct counts: For each pop, numClades clades. For each clade, numTypes types (A and B).
         numTypes = 2 # A and B
         current = np.zeros(shape = (self.numPops, self.numClades, numTypes)) # current residents
         mig = np.zeros(shape = (self.numPops, self.numClades, numTypes)) # migration rate
@@ -187,13 +202,14 @@ class Grid():
                 current[j][i][1] = clade.nB
                 mig[j][i][0] = clade.mu
                 mig[j][i][1] = clade.mu
-
         #print("current\n", current)
         #print("mig\n", mig)
+
+        # go is the frequencies of how many leave each pop
         go = np.multiply(current, mig)
         #print("go\n", go)
 
-        # this many leave each pop
+        # final is current frequencies, minus those that go
         final = current - go
 
         # this fraction go to each other (i!=j) pop
@@ -212,6 +228,8 @@ class Grid():
                 clade.nB = final[j][i][1]
 
     def one_gen(self, gen, epochGen):
+        # one generation of evolution for the whole grid
+        # swap environments every epochGen generations
         if gen % epochGen == 0:
             print(f"gen:{gen} epoch:{int(gen / epochGen)}")# envt:{envt}")
 
@@ -221,16 +239,17 @@ class Grid():
 
             print(self) # start of every epoch
 
+        # the mode is fixed for each run - either 'mutation' or 'migration'
         if self.mode == 'mutation':
             for pop in self.pops:
-                pop.update_gen_data()
+                pop.update_gen_data() # log data
                 pop.select()  # converts from int to freq
                 pop.mutate()  # works on freq
                 pop.normalize()  # converts from freq to int
 
         elif self.mode == 'migration':
             for pop in self.pops:
-                pop.update_gen_data()
+                pop.update_gen_data() #log data
                 pop.select() # converts from int to freq
 
             self.migrate() # works on freq
@@ -240,9 +259,8 @@ class Grid():
         else:
             raise Exception(f"invalid mode: {self.mode}")
 
-
 def main():
-    maxN = 1e9 # maxN < 0 means infinite pop
+    maxN = 1e6 # maxN < 0 means infinite pop
     numEpochs = 1
     T = 1e5
     s = 0.1 # 10./T
