@@ -80,3 +80,55 @@ def assertx(cond, msg=None, show_stack=False):
         # print a single-line error and exit without printing a traceback
         sys.stderr.write(f"\nError: {msg}\n\n")
         sys.exit(1)
+        
+def plot_binomial_samples(N, p, size=10000):
+    from scipy.stats import binom
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from scipy.stats import skew
+
+    assertx(isinstance(N, int) and not isinstance(N, bool) and 2 <= N <= 10000,
+            "N must be an integer between 2 and 10000")
+    
+    # draw samples from the binomial and plot histogram + theoretical pmf
+    samples = binom.rvs(n=N, p=p, size=size)
+
+    mean = np.mean(samples)
+    stddev = np.std(samples, ddof=1)  # sample standard deviation
+    #var = np.var(samples, ddof=1)
+    #skewness = skew(samples, bias=False)
+    print(f"mean: {mean:.3f}")
+    print(f"stddev/N: {stddev/N:.5f}")
+    #print(f"skewness: {skewness:.5f}")
+
+    plt.figure(figsize=(10, 4))
+    bins = np.arange(0, N + 2) - 0.5
+    plt.hist(samples, bins=bins, density=True, alpha=0.6, label=f'sampled (size={size})')
+
+    k = np.arange(0, N + 1)
+    pmf = binom.pmf(k, N, p)
+    plt.plot(k, pmf, 'r-', lw=1, label='theoretical pmf')
+
+    plt.xlim(0,#max(0, int(N * p - 4 * np.sqrt(N * p * (1 - p)))), 
+            N)#min(N, int(N * p + 4 * np.sqrt(N * p * (1 - p)))))
+    
+    # plot vertical lines for + and - stddev around the mean
+    #plt.axvline(mean, color='k', linestyle='--', label='mean')
+    plt.axvline(mean - stddev, color='gray', linestyle=':', label='+/- stddev')
+    plt.axvline(mean + stddev, color='gray', linestyle=':')
+    
+    # xticks should be integers with reasonable spacing
+    xmin, xmax = plt.xlim()
+    start = max(0, int(np.floor(xmin)))
+    end = int(np.ceil(xmax))
+    max_ticks = 20
+    step = max(1, int(np.ceil((end - start) / max_ticks)))
+    ticks = np.arange(start, end + 1, step)
+    plt.xticks(ticks, [str(int(t)) for t in ticks])
+    
+    plt.xlabel('Number of offspring (k)')
+    plt.ylabel('Probability')
+    plt.title(f'Binomial(n={N}, p={p}) samples vs theoretical PMF')
+    plt.legend()
+    plt.show()
+    

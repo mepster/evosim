@@ -4,16 +4,24 @@ import numpy as np
 from helpers import *
 import math
 
-class Environment():
-    def __init__(self, sA, sB, idx):
+import warnings
+warnings.filterwarnings('ignore')
+
+class Environment:
+    def __init__(self, args, idx, sA, sB):
+        self.args = args
         self.idx = idx
         self.sA = sA
         self.sB = sB
         self.active_env = [] # pairs of (gen, env)
 
     def __repr__(self):
-        return f"{"A" if self.idx == 0 else "B"}\tsA={self.sA}\tsB={self.sB}"
+        ret = f"env {self.label()}:\tsA={self.sA}\tsB={self.sB}"
+        return ret
 
+    def label(self):
+        return "A" if self.idx == 0 else "B"
+    
     def swap(self, gen): # swap which allele is favored
         self.idx = (self.idx+1)%2
         tmp = self.sA
@@ -25,8 +33,9 @@ class Environment():
 
 class Clade:
     # a clade contains two genotypes: A and B, with the same fixed mutation rate
-    def __init__(self, m, args):
+    def __init__(self, args, m):
         # initialize one clade
+        self.args = args
         self.N = args['N']
         aToB = args['aToB']
         numClades = args['numClades']
@@ -98,8 +107,9 @@ class Clade:
 
 class Pop:
     # a population contains multiple clades
-    def __init__(self, idx, args):
+    def __init__(self, args, idx):
         # initialize one population
+        self.args = args
         self.N = args['N']
         self.env = args['env']
         numClades = args['numClades']
@@ -108,7 +118,7 @@ class Pop:
         # the list of clades in this population
         self.clades = []
         for m in range(0, numClades):
-            clade = Clade(m, args)
+            clade = Clade(args, m=m)
             self.clades.append(clade)
         # args["numClades"] = 1
         # clade = Clade(numClades-3, args)
@@ -122,7 +132,7 @@ class Pop:
 
     def __repr__(self):
         # for printing population info in pretty format
-        ret = f"\tpop {self.label}\tenv: {self.env}\tsumN: {self.sumN():.2f}\n"
+        ret = f"\tpop {self.label}\tsumN: {self.sumN():.2f}\t({self.env})\n"
         # this includes printing each clade
         for idx, clade in enumerate(self.clades):
             ret = ret + f"{clade}"
@@ -154,11 +164,12 @@ class Pop:
         for clade in self.clades:
             clade.normalize(sumN, self.N)
 
-    # def one_gen_with_mutation(self, gen):
-    #     self.update_gen_data()
-    #     self.select() # converts from int to freq
-    #     self.mutate() # works on freq
-    #     self.normalize() # converts from freq to int
+    def one_gen_mutation_mode(self):
+        self.update_gen_data()
+        self.select() # converts from int to freq
+        if not self.args.skipMutation:
+            self.mutate() # works on freq
+        self.normalize() # converts from freq to int
 
 
 class Grid():
@@ -166,10 +177,10 @@ class Grid():
     # The point is that you can have migration between populations
     def __init__(self, args):
         # initialize the grid of populations (there is only one grid per run)
+        self.args = args
         self.numPops = args['numPops']
         self.numClades = args['numClades']
         self.mode = args['mode'] # 'mutation' or 'migration
-        self.skipMutation = args['skipMutation']
         self.print_stats = args['print_stats']
 
         s = args['s']
@@ -178,12 +189,12 @@ class Grid():
         self.pops = []
         for idx in range(self.numPops):
             if idx%2 == 0:
-                args['env'] = Environment(idx=1, sA=0.0, sB=s)  # immediately swaps at gen 0
+                args['env'] = Environment(args, idx=1, sA=0.0, sB=s)  # immediately swaps at gen 0
                 args['aToB'] = aToB
             else:
-                args['env'] = Environment(idx=0, sA=s, sB=0.0) # immediately swaps at gen 0
+                args['env'] = Environment(args, idx=0, sA=s, sB=0.0) # immediately swaps at gen 0
                 args['aToB'] = 1.0-aToB
-            pop = Pop(idx, args)
+            pop = Pop(args, idx)
             self.pops.append(pop)
 
     def __repr__(self):
@@ -257,20 +268,14 @@ class Grid():
         # the mode is fixed for each run - either 'mutation' or 'migration'
         if self.mode == 'mutation':
             for pop in self.pops:
-                pop.update_gen_data() # log data
-                pop.select()  # converts from int to freq
-                if not self.skipMutation:
-                    pop.mutate()  # works on freq
-                pop.normalize()  # converts from freq to int
-
+                pop.one_gen_mutation_mode()
         elif self.mode == 'migration':
+            # migration mode is tricker because migration happens between populations
             for pop in self.pops:
                 pop.update_gen_data() #log data
                 pop.select() # converts from int to freq
-
-            if not self.skipMutation:
+            if not self.args.skipMutation:
                 self.migrate() # works on freq
-
             for pop in self.pops:
                 pop.normalize() # converts from freq to int
         else:
@@ -278,7 +283,7 @@ class Grid():
 
 
 default_args = DotAccessibleDict({'numPops': 1, 'N': 1e5, 'minMu':2, 'numClades': 1, 'aToB': 0.5, 'T':1e3, 'numEpochs':1, \
-                's':0.1, 'skipMutation': False, 'plotLog': False, 'plotAB': True, 'print_stats': False})
+                's':0.1, 'skipMutation': False, 'plotLog': False, 'plotAB': True, 'print_stats': True})
 
 
 #@timeit
