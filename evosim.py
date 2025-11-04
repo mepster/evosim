@@ -12,7 +12,7 @@ class Environment():
         self.active_env = [] # pairs of (gen, env)
 
     def __repr__(self):
-        return f"{"A" if self.idx == 0 else "B"}\tsA:{self.sA}\tsB:{self.sB}"
+        return f"{"A" if self.idx == 0 else "B"}\tsA={self.sA}\tsB={self.sB}"
 
     def swap(self, gen): # swap which allele is favored
         self.idx = (self.idx+1)%2
@@ -27,7 +27,7 @@ class Clade:
     # a clade contains two genotypes: A and B, with the same fixed mutation rate
     def __init__(self, m, args):
         # initialize one clade
-        N = args['N']
+        self.N = args['N']
         aToB = args['aToB']
         numClades = args['numClades']
         minMu = args['minMu']
@@ -38,11 +38,11 @@ class Clade:
 
         fracA = 1.0 / numClades * aToB  # initial fraction of A genotype
         fracB = 1.0 / numClades * (1.0 - aToB) # initial fraction of B genotype
-        if N < 0:  # infinite pop - floating point "frequency" of each genotype
+        if self.N < 0:  # infinite pop - floating point "frequency" of each genotype
             self.nA = fracA
             self.nB = fracB
         else: # finite pop - integer count of each genotype
-            self.nA, self.nB = binom.rvs(n=round(N), p=[fracA, fracB])
+            self.nA, self.nB = binom.rvs(n=round(self.N), p=[fracA, fracB])
 
         # for logging of the counts of the 2 genotypes within the clade over time
         self.countsA = []
@@ -57,8 +57,11 @@ class Clade:
 
     def __repr__(self):
         # for printing clade info in pretty format
-        ret = ""
-        ret = ret + f"mu:{self.mu:10.1e}\tnA: {self.nA:10.1f},\tnB:{self.nB:10.1f},\t(n:{self.nA+self.nB:10.1f})"
+        ret = f"\t\tclade {self.label}:"
+        if self.N < 0:
+            ret = ret + f"\t(freqA={self.nA:.2e}\t freqB={self.nB:.2e})\t(mu:{self.mu:4.1e})"
+        else:
+            ret = ret + f"\t(n={self.nA+self.nB:6.0f}\t nA={self.nA:6.0f}\t nB={self.nB:6.0f})\t(mu:{self.mu:4.1e})"
         return ret
 
     def select(self, env):
@@ -95,11 +98,12 @@ class Clade:
 
 class Pop:
     # a population contains multiple clades
-    def __init__(self, args):
+    def __init__(self, idx, args):
         # initialize one population
         self.N = args['N']
         self.env = args['env']
         numClades = args['numClades']
+        self.label = f"{idx}"
 
         # the list of clades in this population
         self.clades = []
@@ -118,12 +122,13 @@ class Pop:
 
     def __repr__(self):
         # for printing population info in pretty format
-        ret = ""
+        ret = f"\tpop {self.label}\tenv: {self.env}\tsumN: {self.sumN():.2f}\n"
         # this includes printing each clade
-        ret = ret + f"\tenv: {self.env}\n"
-        ret = ret + f"\tsumN: {self.sumN():.2f}\n"
         for idx, clade in enumerate(self.clades):
-            ret = ret + f"\tclade {clade.label}: {clade}\n"
+            ret = ret + f"{clade}"
+            
+            if idx < len(self.clades)-1:
+                ret = ret + "\n"
         return ret
 
     def sumN(self): # counts individuals in this population
@@ -178,15 +183,18 @@ class Grid():
             else:
                 args['env'] = Environment(idx=0, sA=s, sB=0.0) # immediately swaps at gen 0
                 args['aToB'] = 1.0-aToB
-            pop = Pop(args)
+            pop = Pop(idx, args)
             self.pops.append(pop)
 
     def __repr__(self):
         # for printing the grid info in pretty format
-        ret = ""
         # this includes printing each population
+        ret = ""
         for idx, pop in enumerate(self.pops):
-            ret = ret + f" pop {idx}:\n{pop}"
+            ret = ret + f"{pop}"
+            
+        if idx < len(self.pops)-1:
+            ret = ret + "\n"
         return ret
 
     def migrate(self):
@@ -237,7 +245,7 @@ class Grid():
             # at the start of each epoch
             if self.print_each_epoch:
                 print(f"gen:{gen} epoch:{int(gen / epochGen)}")# envt:{envt}")
-                print(f"swap environment to {'A' if self.pops[0].env.idx == 1 else 'B'}")
+                #print(f"swap environment to {'A' if self.pops[0].env.idx == 1 else 'B'}")
             
             for pop in self.pops:
                 # swap environment in each pop
@@ -268,10 +276,12 @@ class Grid():
         else:
             raise Exception(f"invalid mode: {self.mode}")
 
+
 default_args = DotAccessibleDict({'numPops': 1, 'N': 1e9, 'minMu':2, 'numClades': 1, 'aToB': 0.5, 'numEpochs':1, 'T':1e3, \
                 's':0.1, 'skipMutation': False, 'plotLog': False, 'plotAB': True, 'print_each_epoch': True})
 
-@timeit
+
+#@timeit
 def evosim(override_args=DotAccessibleDict()):
     global default_args
     # numPops: number of populations
@@ -324,7 +334,7 @@ def evosim(override_args=DotAccessibleDict()):
     
     grid = Grid(args)
 
-    for gen in range(int(numEpochs*T)):
+    for gen in range(int(numEpochs*T+1)):
         grid.one_gen(gen, T)
 
     ## plot simulation
