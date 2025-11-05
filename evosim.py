@@ -371,7 +371,7 @@ def evosim(override_args=DotAccessibleDict()):
                 if args.plotAB:
                     handles.append(ax.plot(clade.countsA, color=shades[1], linestyle="-")[0])
                     labels.append(r"$\mathit{M}_{{%d}},A$" % (clade.m + minMu))
-                    handles.append(ax.plot(clade.countsB, color=shades[3], linestyle=":")[0])
+                    handles.append(ax.plot(clade.countsB, color=shades[3], linestyle="--")[0])
                     labels.append(r"$\mathit{M}_{{%d}},B$" % (clade.m + minMu))
                 else:
                     handles.append(ax.plot(clade.counts, color=shades[2], linestyle="-")[0]) # note [0]
@@ -379,7 +379,7 @@ def evosim(override_args=DotAccessibleDict()):
             else:
                 if args.plotAB:
                     ax.plot(clade.countsA, color=shades[1], linestyle="-")
-                    ax.plot(clade.countsB, color=shades[3], linestyle=":")
+                    ax.plot(clade.countsB, color=shades[3], linestyle="--")
                 else:
                     ax.plot(clade.counts, color=shades[2], linestyle="-")
         ax.locator_params(axis='x', nbins=5)  # just put 5 major tics
