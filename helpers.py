@@ -81,14 +81,14 @@ def assertx(cond, msg=None, show_stack=False):
         sys.stderr.write(f"\nError: {msg}\n\n")
         sys.exit(1)
         
-def plot_binomial_samples(N, p, size=10000):
+def plot_binomial_samples(N, p, size=100000):
     from scipy.stats import binom
     import matplotlib.pyplot as plt
     import numpy as np
     from scipy.stats import skew
 
-    assertx(isinstance(N, int) and not isinstance(N, bool) and 2 <= N <= 10000,
-            "N must be an integer between 2 and 10000")
+    assertx(isinstance(N, int) and not isinstance(N, bool) and 1 <= N <= 10000,
+            "N must be an integer between 1 and 100000")
     
     # draw samples from the binomial and plot histogram + theoretical pmf
     samples = binom.rvs(n=N, p=p, size=size)
@@ -97,8 +97,8 @@ def plot_binomial_samples(N, p, size=10000):
     stddev = np.std(samples, ddof=1)  # sample standard deviation
     #var = np.var(samples, ddof=1)
     #skewness = skew(samples, bias=False)
-    print(f"mean: {mean:.3f}")
-    print(f"stddev/N: {stddev/N:.5f}")
+    print(f"mean: {mean:.3f}\t\tshould be ~Np: {N*p:.3f}")
+    print(f"stddev/N: {stddev/N:.5f}\tshould be ~sqrt(p(1-p)/N): {np.sqrt(p*(1-p)/N):.5f}")
     #print(f"skewness: {skewness:.5f}")
 
     plt.figure(figsize=(10, 4))
@@ -107,14 +107,16 @@ def plot_binomial_samples(N, p, size=10000):
 
     k = np.arange(0, N + 1)
     pmf = binom.pmf(k, N, p)
-    plt.plot(k, pmf, 'r-', lw=1, label='theoretical pmf')
+    plt.plot(k, pmf, 'r.', markersize=3, label='theoretical pmf')
 
-    plt.xlim(0,#max(0, int(N * p - 4 * np.sqrt(N * p * (1 - p)))), 
-            N)#min(N, int(N * p + 4 * np.sqrt(N * p * (1 - p)))))
+    (xmin, xmax) = (-0.5, N+0.5) if N<100 else (0, N)
+    plt.xlim(xmin,#max(0, int(N * p - 4 * np.sqrt(N * p * (1 - p)))), 
+             xmax)#min(N, int(N * p + 4 * np.sqrt(N * p * (1 - p)))))
+ 
     
     # plot vertical lines for + and - stddev around the mean
     #plt.axvline(mean, color='k', linestyle='--', label='mean')
-    plt.axvline(mean - stddev, color='gray', linestyle=':', label='+/- stddev')
+    plt.axvline(mean - stddev, color='gray', linestyle=':', label='mean +/- stddev')
     plt.axvline(mean + stddev, color='gray', linestyle=':')
     
     # xticks should be integers with reasonable spacing
@@ -123,10 +125,17 @@ def plot_binomial_samples(N, p, size=10000):
     end = int(np.ceil(xmax))
     max_ticks = 20
     step = max(1, int(np.ceil((end - start) / max_ticks)))
-    ticks = np.arange(start, end + 1, step)
+    ticks = np.arange(start, end, step)
     plt.xticks(ticks, [str(int(t)) for t in ticks])
+
+    # # set y-axis to log scale and ensure a small positive lower bound to avoid zeros
+    # ax = plt.gca()
+    # ax.set_yscale('log')
+    # positive = pmf[pmf > 0]
+    # ymin = float(positive.min()) if positive.size else 1e-12
+    # ax.set_ylim(bottom=max(ymin * 1e-3, 1e-12))
     
-    plt.xlabel('Number of offspring (k)')
+    plt.xlabel('Number of successes (offspring)')
     plt.ylabel('Probability')
     plt.title(f'Binomial(n={N}, p={p}) samples vs theoretical PMF')
     plt.legend()
