@@ -81,7 +81,7 @@ def assertx(cond, msg=None, show_stack=False):
         sys.stderr.write(f"\nError: {msg}\n\n")
         sys.exit(1)
         
-def plot_binomial_samples(N, p, size=100000):
+def plot_binomial_samples(N, p, samples=100000):
     from scipy.stats import binom
     import matplotlib.pyplot as plt
     import numpy as np
@@ -90,20 +90,20 @@ def plot_binomial_samples(N, p, size=100000):
     assertx(isinstance(N, int) and not isinstance(N, bool) and 1 <= N <= 10000,
             "N must be an integer between 1 and 100000")
     
-    # draw samples from the binomial and plot histogram + theoretical pmf
-    samples = binom.rvs(n=N, p=p, size=size)
+    # draw draws from the binomial and plot histogram + theoretical pmf
+    draws = binom.rvs(n=N, p=p, size=samples)
 
-    mean = np.mean(samples)
-    stddev = np.std(samples, ddof=1)  # sample standard deviation
-    #var = np.var(samples, ddof=1)
-    #skewness = skew(samples, bias=False)
+    mean = np.mean(draws)
+    stddev = np.std(draws, ddof=1)  # sample standard deviation
+    #var = np.var(draws, ddof=1)
+    #skewness = skew(draws, bias=False)
     print(f"mean: {mean:.3f}\t\tshould be ~Np: {N*p:.3f}")
     print(f"stddev/N: {stddev/N:.5f}\tshould be ~sqrt(p(1-p)/N): {np.sqrt(p*(1-p)/N):.5f}")
     #print(f"skewness: {skewness:.5f}")
 
     plt.figure(figsize=(10, 4))
     bins = np.arange(0, N + 2) - 0.5
-    plt.hist(samples, bins=bins, density=True, alpha=0.6, label=f'sampled (size={size})')
+    plt.hist(draws, bins=bins, density=True, alpha=0.6, label=f"1 sample" if samples==1 else f"{samples} samples")
 
     k = np.arange(0, N + 1)
     pmf = binom.pmf(k, N, p)

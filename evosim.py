@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from helpers import *
 import math
+import random
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -21,7 +22,8 @@ class Environment:
 
     def label(self):
         return "A" if self.idx == 0 else "B"
-    
+
+
     def swap(self, gen): # swap which allele is favored
         self.idx = (self.idx+1)%2
         tmp = self.sA
@@ -167,7 +169,7 @@ class Pop:
     def one_gen_mutation_mode(self):
         self.update_gen_data()
         self.select() # converts from int to freq
-        if not self.args.skipMutation:
+        if self.args.includeMutation:
             self.mutate() # works on freq
         self.normalize() # converts from freq to int
 
@@ -181,7 +183,7 @@ class Grid():
         self.numPops = args['numPops']
         self.numClades = args['numClades']
         self.mode = args['mode'] # 'mutation' or 'migration
-        self.print_stats = args['print_stats']
+        self.printStats = args['printStats']
 
         s = args['s']
         aToB = args['aToB']
@@ -251,10 +253,15 @@ class Grid():
 
     def one_gen(self, gen, epochGen):
         # one generation of evolution for the whole grid
-        # swap environment every epochGen generations
-        if (gen % epochGen == 0):
-            # at the start of each epoch
-            if self.print_stats:
+        # swap environment either:
+        #   at gen==0
+        #   or, if not args.stochasticEnv, then every epochGen generations *exactly*.
+        #   or, if args.stochasticEnv, then every epochGen generations *in expectation*.
+        if gen == 0 or \
+            (not self.args.stochasticEnv and (gen % epochGen == 0)) or \
+            (self.args.stochasticEnv and (random.random() < 1./epochGen)):
+
+            if self.printStats:
                 print(f"gen:{gen} epoch:{int(gen / epochGen)}")# envt:{envt}")
                 #print(f"swap environment to {'A' if self.pops[0].env.idx == 1 else 'B'}")
             
@@ -262,7 +269,7 @@ class Grid():
                 # swap environment in each pop
                 pop.env.swap(gen)
 
-            if self.print_stats:
+            if self.printStats:
                 print(self) # start of every epoch
 
         # the mode is fixed for each run - either 'mutation' or 'migration'
@@ -274,7 +281,7 @@ class Grid():
             for pop in self.pops:
                 pop.update_gen_data() #log data
                 pop.select() # converts from int to freq
-            if not self.args.skipMutation:
+            if self.args.includeMutation:
                 self.migrate() # works on freq
             for pop in self.pops:
                 pop.normalize() # converts from freq to int
@@ -283,7 +290,7 @@ class Grid():
 
 
 default_args = DotAccessibleDict({'numPops': 1, 'N': 1e5, 'minMu':2, 'numClades': 1, 'aToB': 0.5, 'T':1e3, 'numEpochs':1, \
-                's':0.1, 'skipMutation': False, 'plotLog': False, 'plotAB': True, 'print_stats': True})
+                's':0.1, 'includeMutation': True, 'plotLog': False, 'plotAB': True, 'printStats': False, 'stochasticEnv': False})
 
 
 #@timeit
@@ -297,10 +304,10 @@ def evosim(override_args=DotAccessibleDict()):
     # T: number of generations per epoch
     # numEpochs: number of epochs
     # s: selection coefficient
-    # skipMutation: if True, skip mutation step
+    # includeMutation: if True, perform mutation step
     # plotLog: if True, use log scale for plots
     # plotAB: if True, plot A and B genotypes separately; if False, plot total (A+B)
-    # print_stats: if True, print grid stats at start of each epoch
+    # printStats: if True, print grid stats at start of each epoch
 
     #print("user_args:", user_args)
     #print("default_args:", default_args)
@@ -310,7 +317,7 @@ def evosim(override_args=DotAccessibleDict()):
         raise KeyError(f"Unknown argument keys: {sorted(unknown_keys)}")
     args = DotAccessibleDict(default_args.copy())
     args.update(override_args)
-    print("args:", args)
+    #print("args:", args)
 
     N = args.N
     numPops = args.numPops
@@ -332,11 +339,11 @@ def evosim(override_args=DotAccessibleDict()):
 
     if N>0:
         Ns = abs(N*s)
-        print(f"Ns:{Ns} is low < 10.0 (selection is WEAK relative to drift)" if Ns < 10.0 else f"Ns:{Ns} >= 10.0 (selection is STRONG relative to drift)")
+        print(f"Ns:{Ns} is low < 10.0 (selection is WEAK relative to drift)" if Ns < 10.0 else f"Ns:{Ns} is high >= 10.0 (selection is STRONG relative to drift)")
     else:
         print(f"Infinite population size N (there is no drift)")
     sT = abs(s*T)
-    print(f"sT:{sT} is low < 20.0 (fixation WON'T usually happen in one epoch)" if sT < 20.0 else f"sT:{sT} >= 20.0 (fixation CAN happen in one epoch (ignoring mutation))")
+    print(f"sT:{sT} is low < 20.0 (fixation WON'T usually happen in one epoch)" if sT < 20.0 else f"sT:{sT} is high >= 20.0 (fixation CAN happen in one epoch (ignoring mutation))")
 
 
     ## run simulation
@@ -402,7 +409,7 @@ def evosim(override_args=DotAccessibleDict()):
             if N<0: # for infinite pop
                 ax.set_ylim(1e-8, 1.5)
             else: 
-                ax.set_ylim(N*1e-6, 1.5*N)
+                ax.set_ylim(1, 1.5*N) #(N*1e-6, 1.5*N)
         else:
             ax.set_ylim(-0.001*abs(N), 1.005*abs(N))
         for swap_gen, env_idx in pop.env.active_env:
