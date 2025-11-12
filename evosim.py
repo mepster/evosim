@@ -292,6 +292,11 @@ class Grid():
 default_args = DotAccessibleDict({'numPops': 1, 'N': 1e5, 'minMu':2, 'numClades': 1, 'aToB': 0.5, 'T':1e3, 'numEpochs':1, \
                 's':0.1, 'includeMutation': True, 'plotLog': False, 'plotAB': True, 'printStats': False, 'stochasticEnv': False})
 
+def round_to_int(x, name):
+    rounded = round(x)
+    if rounded != x:
+        print(f"note: rounding {name} to {rounded}!")
+    return rounded
 
 #@timeit
 def evosim(override_args=DotAccessibleDict()):
@@ -319,17 +324,17 @@ def evosim(override_args=DotAccessibleDict()):
     args.update(override_args)
     #print("args:", args)
 
-    N = args.N
-    numPops = args.numPops
-    minMu = args.minMu
-    numClades = args.numClades
+    N = round_to_int(args.N, "N")
+    numPops = round_to_int(args.numPops, "numPops")
+    minMu = round_to_int(args.minMu, "minMu")
+    numClades = round_to_int(args.numClades, "numClades")
     s = args.s
-    T = args.T
-    numEpochs = args.numEpochs
+    T = args.T = round_to_int(args.T, "T")
+    numEpochs = round_to_int(args.numEpochs, "numEpochs")
     aToB = args.aToB
 
     # check constraints on arguments
-    assertx(N <0 or N >=10, "N must be <0 (which means infinite pop) or >=10")
+    assertx(N <0 or N >=10, "N must be -1 (which means infinite pop) or >=10")
     assertx(N <= 1e9, "N must be <= 1e9")
     assertx(minMu >=2 and minMu <=8, "minMu must be between 2 and 8")
     assertx(numClades >=1 and minMu+numClades <=9, "numClades must be >= 1, and minMu+numClades must be <=9")
