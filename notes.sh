@@ -45,7 +45,7 @@ i=7; while [ "$i" -le 10 ]; do
 i=1; while [ "$i" -le 10 ]; do
     export JU="jupyter-user${i}"
     echo $JU
-    docker exec --user $JU -it -w /home/$JU/evosim tljh-dev /bin/bash -exec "git pull ; git checkout -f"
+    docker exec --user $JU -it -w /home/$JU/evosim tljh-dev /bin/bash -exec "git checkout -f ; git pull ; git checkout -f"
     #docker exec --user $JU -it -w /home/$JU/evosim tljh-dev /bin/bash -exec "/opt/miniforge3/bin/conda env list"
     i=$((i+1))
     done
