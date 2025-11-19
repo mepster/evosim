@@ -294,7 +294,7 @@ class Grid():
 
 default_args = DotAccessibleDict({'numPops': 1, 'N': 1e5, 'minMu':2, 'numClades': 1, 'aToB': 0.5, 'T':1e3, 's':0.1, \
                 'numEpochs':1, 'numRuns':1, 'includeMutation': True, 'stochasticEnv': False, \
-                'plotLog': False, 'plotAB': True, 'plotFit': False, 'hideB': False, 'printStats': False})
+                'plotLog': False, 'plotAB': True, 'plotKFit': False, 'hideB': False, 'printStats': False})
 
 def round_to_int(x, name):
     rounded = round(x)
@@ -419,7 +419,106 @@ def evosim_plot(args, runs):
     xlog = args.plotLog
     ylog = args.plotLog
     
-    if args.plotFit:
+    if True: # plot counts over time
+        fig, axes = plt.subplots(numPops, layout='constrained', figsize=(4.0, numPops*4.0)) # 6.4x numPops*4.8.
+        if numPops == 1: axes = [axes]
+        fig.suptitle(f"N={strN}, s={e_format(s)}, T={e_format(T)}{" (multiple runs)" if numRuns>1 else ""}")
+
+        for r in range(numRuns): # each independent run
+            grid = runs[r].grid
+            args = runs[r].args
+
+            lw = 1
+            lsA = "-"
+            lsB = "--"
+            for idx, pop in enumerate(grid.pops): # each deme in the grid
+                ax = axes[idx]
+                for idx2, clade in enumerate(pop.clades): # each clade in each pop
+                    # Fixed colors: M2 is red, M3 is green, M4 is blue, M5 is magenta, M6 is cyan, M7 is orange, 
+                    # darker shade for allele A, lighter shade for allele B
+                    shades = [scale_lightness(colors[clade.m + minMu - 2], scale) for scale in [0.5, .75, 1., 1.25, 1.5]]
+                    if idx==0: # with handles and labels
+                        if args.plotAB: # break out A and B
+                            # plot A only
+                            handles.append(ax.plot(clade.countsA, color=shades[1], linestyle=lsA, linewidth=lw)[0])
+                            if r == 0: # only add labels once
+                                labels.append(r"$\mathit{M}_{{%d}},A$" % (clade.m + minMu))
+                            if not args.hideB:
+                                # plot B as well as A
+                                handles.append(ax.plot(clade.countsB, color=shades[3], linestyle=lsB, linewidth=lw)[0])
+                                if r == 0: # only add labels once
+                                    labels.append(r"$\mathit{M}_{{%d}},B$" % (clade.m + minMu))
+                        else:
+                            handles.append(ax.plot(clade.counts, color=shades[2], linestyle=lsA, linewidth=lw)[0]) # note [0]
+                            if r == 0: # only add labels once
+                                labels.append(r"$\mathit{M}_{{%d}},(A+B)$" % (clade.m + minMu))
+                    else: # just plot, no handles or labels
+                        if args.plotAB:
+                            ax.plot(clade.countsA, color=shades[1], linestyle=lsA, linewidth=lw)
+                            if not args.hideB:
+                                # plot B as well as A
+                                ax.plot(clade.countsB, color=shades[3], linestyle=lsB, linewidth=lw)
+                        else:
+                            ax.plot(clade.counts, color=shades[2], linestyle=lsA, linewidth=lw)
+                            
+                # formats y axis labels nicely
+                # thanks copilot!
+                from matplotlib.ticker import FuncFormatter
+                ax.get_yaxis().set_major_formatter(FuncFormatter(
+                    lambda x, pos: "0" if x == 0 else (
+                    "{:.0f}".format(x) if (abs(x) >= 1 and abs(x) < 10000) else
+                    ("{:.2g}".format(x) if abs(x) < 1 and abs(x) < 10000 else
+                    "{:.1e}".format(x).replace("e+0", "e").replace("e+", "e").replace("e-0", "e-")))
+                ))
+
+                if idx != numPops-1: # all except bottom plot get no x axis labels
+                    axes[idx].tick_params(labelbottom=False)
+                    #axes[idx].locator_params(axis='x', nbins=5)  # just put 5 major tics
+
+                if numPops > 1:
+                    ax.set_ylabel(f"pop {idx}")
+                else:
+                    ax.set_ylabel("N" if N>0 else "frequency")
+                
+                if xlog:
+                    ax.set_xscale("log", nonpositive='mask')
+
+                if ylog:
+                    ax.set_yscale("log", nonpositive='mask')
+                    if N<0: # for infinite pop
+                        ax.set_ylim(1e-8, 1.5)
+                    else: 
+                        ax.set_ylim(1, 1.5*N) #(N*1e-6, 1.5*N)
+                else:
+                    ax.set_ylim(-0.001*abs(N), 1.005*abs(N))
+                    
+                # print vertical lines and labels for environment swaps
+                # (ylim has to be set before this)
+                for swap_gen, env_idx in pop.env.active_env:
+                    ax.axvline(x=swap_gen+(1 if xlog else 0), color='gray', linestyle='--', linewidth=1)
+                    label = 'A' if env_idx == 'A' else 'B'
+                    y_pos = ax.get_ylim()[1] # *0.96
+                    ax.text(swap_gen+(1 if xlog else 0), y_pos, label, color='gray', ha='center', va='bottom', fontsize=10) # -ax.get_xlim()[1]*0.015 + 
+                
+            plt.xlabel("generations")
+
+        #plt.figlegend(bbox_to_anchor=(1.05, 1.0), loc='upper left')
+        #print(f"pop {idx} env: {pop.env.active_env}")
+
+        #ax = axes[numPops]
+        #ax.plot(grid.pops[0].envs)
+
+        #plt.figlegend(handles=handles, labels=labels, loc='outside right center')
+        plt.figlegend(handles=handles, labels=labels,
+            loc='upper center', bbox_to_anchor=(0.5, -0.05),
+            fancybox=True, shadow=True, ncol=3)
+
+        #plt.tight_layout()
+        #plt.savefig(f"output/plotx.png", dpi=300)
+        plt.show()
+    
+
+    if args.plotKFit:
         # compute and plot fit, surv, surprisal for each clade, at each time, averaged over runs
         # fitness stats are for entire clades, not types. Because we might start with 0 of any type
         for r in range(numRuns):
@@ -525,105 +624,7 @@ def evosim_plot(args, runs):
                     loc='upper center', bbox_to_anchor=(0.5, -0.05),
                     fancybox=True, shadow=True, ncol=3)
 
-
-    if True: # plot counts over time
-        fig, axes = plt.subplots(numPops, layout='constrained', figsize=(4.0, numPops*4.0)) # 6.4x numPops*4.8.
-        if numPops == 1: axes = [axes]
-        fig.suptitle(f"N={strN}, s={e_format(s)}, T={e_format(T)}{" (multiple runs)" if numRuns>1 else ""}")
-
-        for r in range(numRuns): # each independent run
-            grid = runs[r].grid
-            args = runs[r].args
-
-            lw = 1
-            lsA = "-"
-            lsB = "--"
-            for idx, pop in enumerate(grid.pops): # each deme in the grid
-                ax = axes[idx]
-                for idx2, clade in enumerate(pop.clades): # each clade in each pop
-                    # Fixed colors: M2 is red, M3 is green, M4 is blue, M5 is magenta, M6 is cyan, M7 is orange, 
-                    # darker shade for allele A, lighter shade for allele B
-                    shades = [scale_lightness(colors[clade.m + minMu - 2], scale) for scale in [0.5, .75, 1., 1.25, 1.5]]
-                    if idx==0: # with handles and labels
-                        if args.plotAB: # break out A and B
-                            # plot A only
-                            handles.append(ax.plot(clade.countsA, color=shades[1], linestyle=lsA, linewidth=lw)[0])
-                            if r == 0: # only add labels once
-                                labels.append(r"$\mathit{M}_{{%d}},A$" % (clade.m + minMu))
-                            if not args.hideB:
-                                # plot B as well as A
-                                handles.append(ax.plot(clade.countsB, color=shades[3], linestyle=lsB, linewidth=lw)[0])
-                                if r == 0: # only add labels once
-                                    labels.append(r"$\mathit{M}_{{%d}},B$" % (clade.m + minMu))
-                        else:
-                            handles.append(ax.plot(clade.counts, color=shades[2], linestyle=lsA, linewidth=lw)[0]) # note [0]
-                            if r == 0: # only add labels once
-                                labels.append(r"$\mathit{M}_{{%d}},(A+B)$" % (clade.m + minMu))
-                    else: # just plot, no handles or labels
-                        if args.plotAB:
-                            ax.plot(clade.countsA, color=shades[1], linestyle=lsA, linewidth=lw)
-                            if not args.hideB:
-                                # plot B as well as A
-                                ax.plot(clade.countsB, color=shades[3], linestyle=lsB, linewidth=lw)
-                        else:
-                            ax.plot(clade.counts, color=shades[2], linestyle=lsA, linewidth=lw)
-                            
-                # formats y axis labels nicely
-                # thanks copilot!
-                from matplotlib.ticker import FuncFormatter
-                ax.get_yaxis().set_major_formatter(FuncFormatter(
-                    lambda x, pos: "0" if x == 0 else (
-                    "{:.0f}".format(x) if (abs(x) >= 1 and abs(x) < 10000) else
-                    ("{:.2g}".format(x) if abs(x) < 1 and abs(x) < 10000 else
-                    "{:.1e}".format(x).replace("e+0", "e").replace("e+", "e").replace("e-0", "e-")))
-                ))
-
-                if idx != numPops-1: # all except bottom plot get no x axis labels
-                    axes[idx].tick_params(labelbottom=False)
-                    #axes[idx].locator_params(axis='x', nbins=5)  # just put 5 major tics
-
-                if numPops > 1:
-                    ax.set_ylabel(f"pop {idx}")
-                else:
-                    ax.set_ylabel("N" if N>0 else "frequency")
-                
-                if xlog:
-                    ax.set_xscale("log", nonpositive='mask')
-
-                if ylog:
-                    ax.set_yscale("log", nonpositive='mask')
-                    if N<0: # for infinite pop
-                        ax.set_ylim(1e-8, 1.5)
-                    else: 
-                        ax.set_ylim(1, 1.5*N) #(N*1e-6, 1.5*N)
-                else:
-                    ax.set_ylim(-0.001*abs(N), 1.005*abs(N))
-                    
-                # print vertical lines and labels for environment swaps
-                # (ylim has to be set before this)
-                for swap_gen, env_idx in pop.env.active_env:
-                    ax.axvline(x=swap_gen+(1 if xlog else 0), color='gray', linestyle='--', linewidth=1)
-                    label = 'A' if env_idx == 'A' else 'B'
-                    y_pos = ax.get_ylim()[1] # *0.96
-                    ax.text(swap_gen+(1 if xlog else 0), y_pos, label, color='gray', ha='center', va='bottom', fontsize=10) # -ax.get_xlim()[1]*0.015 + 
-                
-            plt.xlabel("generations")
-
-            #plt.figlegend(bbox_to_anchor=(1.05, 1.0), loc='upper left')
-            #print(f"pop {idx} env: {pop.env.active_env}")
-
-        #ax = axes[numPops]
-        #ax.plot(grid.pops[0].envs)
-
-        #plt.figlegend(handles=handles, labels=labels, loc='outside right center')
-        plt.figlegend(handles=handles, labels=labels,
-            loc='upper center', bbox_to_anchor=(0.5, -0.05),
-            fancybox=True, shadow=True, ncol=3)
-
-        #plt.tight_layout()
-        #plt.savefig(f"output/plotx.png", dpi=300)
-        plt.show()
-
+    
 def evosim(override_args=DotAccessibleDict()):
     args, runs = evosim_run(override_args)
     evosim_plot(args, runs)
