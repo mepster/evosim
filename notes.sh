@@ -7,6 +7,7 @@ docker exec --user jupyter-user1 -it tljh-dev /bin/bash
 
 ---
 
+
 # make users on jh as admin
 # login as each user to set pw
 
