@@ -4,6 +4,9 @@ import numpy as np
 from helpers import *
 import math
 import random
+import multiprocessing
+import copy
+import os
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -291,7 +294,7 @@ class Grid():
 
 default_args = DotAccessibleDict({'numPops': 1, 'N': 1e5, 'minMu':2, 'numClades': 1, 'aToB': 0.5, 'T':1e3, 's':0.1, \
                 'numEpochs':1, 'numRuns':1, 'includeMutation': True, 'stochasticEnv': False, \
-                'plotLog': False, 'plotAB': True, 'hideB': False, 'printStats': False})
+                'plotLog': False, 'plotAB': True, 'plotFit': False, 'hideB': False, 'printStats': False})
 
 def round_to_int(x, name):
     rounded = round(x)
@@ -343,8 +346,9 @@ def check_args(default_args, override_args):
     
     return args
 
-#@timeit
-def evosim(override_args=DotAccessibleDict()):
+
+#timeit
+def evosim_run(override_args=DotAccessibleDict()):
     global default_args
     # numPops: number of populations
     # N: maximum population size (N <0 means infinite pop)
@@ -371,25 +375,40 @@ def evosim(override_args=DotAccessibleDict()):
         print(f"Infinite population size N (there is no drift)")
     sT = abs(s*T)
     print(f"sT:{sT} is low < 20.0 (fixation WON'T usually happen in one epoch)" if sT < 20.0 else f"sT:{sT} is high >= 20.0 (fixation CAN happen in one epoch (ignoring mutation))")
-
-
+    
+    # numRuns must be 1 with infinite pop, because runs are identical
+    if N < 0:
+        args.numRuns = 1
+        print("Note: setting numRuns to 1 because N < 0 (infinite population)")
+    
     ## run numRuns independent simulations
     runs = []
-    for r in range(numRuns):
-        if args.printStats:
-            print(f"=== Starting run {r+1} of {numRuns} ===")
-        run = one_run(args)
-        runs.append(run)
+    if args.numRuns == 1:
+        # fallback to sequential for a single run
+        for r in range(args.numRuns):
+            if args.printStats:
+                print(f"=== Starting run {r+1} of {args.numRuns} ===")
+            run = one_run(copy.deepcopy(args))
+            runs.append(run)
+    else:
+        nproc = min(args.numRuns, os.cpu_count() or 1)
+        if True: #args.printStats:
+            print(f"=== Starting {args.numRuns} runs in parallel (using multiprocessing) ===")
+            print(f"Using {nproc} processes for {args.numRuns} runs.")
+        # deepcopy args for each run so worker-local mutations don't interfere
+        arg_list = [copy.deepcopy(args) for _ in range(args.numRuns)]
+        ctx = multiprocessing.get_context("spawn")
+        with ctx.Pool(processes=nproc) as pool:
+            runs = pool.map(one_run, arg_list)
 
+    return args, runs
 
-    ## plot simulations
+def evosim_plot(args, runs):
+    N, numPops, minMu, numClades, s, T, numEpochs, aToB, numRuns = \
+    args.N, args.numPops, args.minMu, args.numClades, args.s, args.T, args.numEpochs, args.aToB, args.numRuns
 
     strN = "Inf" if N < 0 else f"{e_format(N)}"
     colors = [col.ColorConverter.to_rgb(x) for x in ["red", "green", "blue", "magenta", "cyan", "#ff9933", "black"]]
-
-    fig, axes = plt.subplots(numPops, layout='constrained', figsize=(8.0, numPops*4.0)) # 6.4x numPops*4.8.
-    if numPops == 1: axes = [axes]
-    fig.suptitle(f"N={strN}, s={e_format(s)}, T={e_format(T)}{" (multiple runs)" if numRuns>1 else ""}")
 
     labels = []
     handles = []
@@ -397,95 +416,237 @@ def evosim(override_args=DotAccessibleDict()):
     xlog = args.plotLog
     ylog = args.plotLog
     
-    for r in range(numRuns): # each independent run
-        grid = runs[r].grid
-        args = runs[r].args
+    if args.plotFit:
+        # compute and plot fit, surv, surprisal for each clade, at each time, averaged over runs
+        for r in range(numRuns):
+            grid = runs[r].grid
+            args = runs[r].args
+            for idx, pop in enumerate(grid.pops):
+                for idx2, clade in enumerate(pop.clades):
+                    print("ZZZZZZ")
+                    print("QQQQQ",len(clade.counts), clade.counts[0], clade.counts[1])
+                    if N < 0:
+                        print("XXXXX")
+                        #clade.fitA = clade.countsA / clade.countsA[0]
+                        #clade.fitB = clade.countsB / clade.countsB[0]
+                        clade.fit = np.array(clade.counts) / clade.counts[0]  # fitness (i.e., relative to initial count) for clade idx2 in pop idx over t
+                        #clade.survA = np.array([1.0 if x>0 else 0.0 for x in clade.countsA])
+                        #clade.survB = np.array([1.0 if x>0 else 0.0 for x in clade.countsB])
+                        clade.surv = np.array([1.0 if x>0 else 0.0 for x in clade.counts]) # survival for clade idx2 in pop idx over t
+                    else:
+                        print("YYYYY")
+                        #clade.fitA = clade.countsA / clade.countsA[0]
+                        #clade.fitB = clade.countsB / clade.countsB[0]
+                        clade.fit = np.array(clade.counts) / clade.counts[0]  # fitness (i.e., relative to initial count) for clade idx2 in pop idx over t
+                        #clade.survA = np.array([1.0 if x>0 else 0.0 for x in clade.countsA])
+                        #clade.survB = np.array([1.0 if x>0 else 0.0 for x in clade.countsB])
+                        clade.surv = np.array([1.0 if x>0 else 0.0 for x in clade.counts]) # survival for clade idx2 in pop idx over t
 
-        lw = 1
-        lsA = "-"
-        lsB = "--"
+        # now compute across-run averages
+        for idx, pop in enumerate(grid.pops):
+            for idx2, clade in enumerate(pop.clades):
+                #clade.avgFitA = np.zeros_like(clade.fitA)
+                #clade.avgFitB = np.zeros_like(clade.fitB)
+                clade.avgFit = np.zeros_like(clade.fit)
+                #clade.avgSurvA = np.zeros_like(clade.survA)
+                #clade.avgSurvB = np.zeros_like(clade.survB)
+                clade.avgSurv = np.zeros_like(clade.surv)
+                for r in range(numRuns):
+                    grid = runs[r].grid
+                    pop = grid.pops[idx]
+                    clade_r = pop.clades[idx2]
+                    #clade.avgFitA += clade_r.fitA
+                    #clade.avgFitB += clade_r.fitB
+                    clade.avgFit += clade_r.fit
+                    #clade.avgSurvA += clade_r.survA
+                    #clade.avgSurvB += clade_r.survB
+                    clade.avgSurv += clade_r.surv
+                #clade.avgFitA /= float(numRuns)
+                #clade.avgFitB /= float(numRuns)
+                clade.avgFit /= float(numRuns)
+                #clade.avgSurvA /= float(numRuns)
+                #clade.avgSurvB /= float(numRuns)
+                clade.avgSurv /= float(numRuns)
+                clade.surprisal = -clade.avgSurv*np.log2(clade.avgSurv + 1e-12) - (1.0 - clade.avgSurv)*np.log2(1.0 - clade.avgSurv + 1e-12)
+            
+            # compute prob that each clade survives, at each run, at each time t
+            p = np.zeros((numClades, numRuns, T*numEpochs))
+            for idx2, clade in enumerate(pop.clades):
+                for r in range(numRuns):
+                    grid = runs[r].grid
+                    pop = grid.pops[idx]
+                    clade_r = pop.clades[idx2]
+                    p[idx2][r] = clade_r.surv # the prob that clade idx2 survives at time t in run r
+            
+            # compute joint surprisal over all clades
+            joint_surprisal = np.zeros(T*numEpochs)
+            numStates = 2**numClades
+            for t in range(T*numEpochs):
+                joint_surv = np.zeros(numStates)
+                for state in range(numStates):
+                    prob = 1.0 # will hold the probability of this joint state at time t
+                    for idx2 in range(numClades):
+                        if (state >> idx2) & 1: # clade idx2 survives in this state
+                            prob = prob * p[idx2][:, t] # the prob that clade idx2 survives at time t in all runs
+                        else: # clade idx2 does NOT survive in this state
+                            prob = prob * (1.0 - p[idx2][:, t]) # the prob that clade idx2 does NOT survive at time t in all runs
+                    joint_surv[state] = np.mean(prob) # average over runs
+                joint_surprisal[t] = -np.sum(joint_surv * np.log2(joint_surv + 1e-12))
+
+
+        # now plot the avg fit (left axis) and surv (right axis) data, with one row for each pop
+        fig, axes = plt.subplots(numPops, 3, layout='constrained', figsize=(3*4.0, numPops*4.0)) # Adjust figsize as needed
+        fig.suptitle(f"N={strN}, s={e_format(s)}, T={e_format(T)}{" (multiple runs)" if numRuns>1 else ""}")
         for idx, pop in enumerate(grid.pops): # each deme in the grid
-            ax = axes[idx]
+            if numPops == 1:
+                ax1, ax2, ax3 = axes[0], axes[1], axes[2]
+            else:
+                ax1, ax2, ax3 = axes[idx][0], axes[idx][1], axes[idx][2]
+
+            lw = 1
+            lsA = "-"
+            lsB = "--"
             for idx2, clade in enumerate(pop.clades): # each clade in each pop
                 # Fixed colors: M2 is red, M3 is green, M4 is blue, M5 is magenta, M6 is cyan, M7 is orange, 
                 # darker shade for allele A, lighter shade for allele B
                 shades = [scale_lightness(colors[clade.m + minMu - 2], scale) for scale in [0.5, .75, 1., 1.25, 1.5]]
-                if idx==0: # with handles and labels
-                    if args.plotAB: # break out A and B
-                        # plot A only
-                        handles.append(ax.plot(clade.countsA, color=shades[1], linestyle=lsA, linewidth=lw)[0])
-                        if r == 0: # only add labels once
-                            labels.append(r"$\mathit{M}_{{%d}},A$" % (clade.m + minMu))
-                        if not args.hideB:
-                            # plot B as well as A
-                            handles.append(ax.plot(clade.countsB, color=shades[3], linestyle=lsB, linewidth=lw)[0])
-                            if r == 0: # only add labels once
-                                labels.append(r"$\mathit{M}_{{%d}},B$" % (clade.m + minMu))
-                    else:
-                        handles.append(ax.plot(clade.counts, color=shades[2], linestyle=lsA, linewidth=lw)[0]) # note [0]
-                        if r == 0: # only add labels once
-                            labels.append(r"$\mathit{M}_{{%d}},(A+B)$" % (clade.m + minMu))
-                else: # just plot, no handles or labels
-                    if args.plotAB:
-                        ax.plot(clade.countsA, color=shades[1], linestyle=lsA, linewidth=lw)
-                        if not args.hideB:
-                            # plot B as well as A
-                            ax.plot(clade.countsB, color=shades[3], linestyle=lsB, linewidth=lw)
-                    else:
-                        ax.plot(clade.counts, color=shades[2], linestyle=lsA, linewidth=lw)
-                        
-            # formats y axis labels nicely
-            # thanks copilot!
-            from matplotlib.ticker import FuncFormatter
-            ax.get_yaxis().set_major_formatter(FuncFormatter(
-                lambda x, pos: "0" if x == 0 else (
-                "{:.0f}".format(x) if (abs(x) >= 1 and abs(x) < 10000) else
-                ("{:.2g}".format(x) if abs(x) < 1 and abs(x) < 10000 else
-                "{:.1e}".format(x).replace("e+0", "e").replace("e+", "e").replace("e-0", "e-")))
-            ))
+                handles.append(ax1.plot(clade.avgFit, color=shades[2], linestyle=lsA, linewidth=lw)[0]) # note [0]
+                labels.append(r"$\mathit{M}_{{%d}},(A+B)$" % (clade.m + minMu))
+                ax2.plot(clade.avgSurv, color=shades[2], linestyle=lsA, linewidth=lw)
+                ax3.plot(clade.surprisal, color=shades[2], linestyle=lsA, linewidth=lw)
+            # plot joint surprisal
+            ax3.plot(joint_surprisal, color='red', linestyle=':', linewidth=2, label='joint')
 
+            ax1.set_ylabel("W_k(0)")
+            ax2.set_ylabel("S_k(0)")
+            ax3.set_ylabel("H(k)")
             if idx != numPops-1: # all except bottom plot get no x axis labels
-                axes[idx].tick_params(labelbottom=False)
-            axes[idx].locator_params(axis='x', nbins=5)  # just put 5 major tics
-
-            if numPops > 1:
-                ax.set_ylabel(f"pop {idx}")
-            else:
-                ax.set_ylabel("N" if N>0 else "frequency")
-            
+                ax1.tick_params(labelbottom=False)
+                ax2.tick_params(labelbottom=False)
+                ax3.tick_params(labelbottom=False)
+            ax1.locator_params(axis='x', nbins=5)  # just put 5 major tics
+            ax2.locator_params(axis='x', nbins=5)  # just put 5 major tics
+            ax3.locator_params(axis='x', nbins=5)  # just put 5 major tics
+            ax1.set_xlabel("generation (k)")
+            ax2.set_xlabel("generation (k)")
+            ax3.set_xlabel("generation (k)")
+        
             if xlog:
-                ax.set_xscale("log", nonpositive='mask')
-
+                ax1.set_xscale("log", nonpositive='mask')
+                ax2.set_xscale("log", nonpositive='mask')
+                ax3.set_xscale("log", nonpositive='mask')
             if ylog:
-                ax.set_yscale("log", nonpositive='mask')
-                if N<0: # for infinite pop
-                    ax.set_ylim(1e-8, 1.5)
-                else: 
-                    ax.set_ylim(1, 1.5*N) #(N*1e-6, 1.5*N)
-            else:
-                ax.set_ylim(-0.001*abs(N), 1.005*abs(N))
+                ax1.set_yscale("log", nonpositive='mask')
                 
-            # print vertical lines and labels for environment swaps
-            # (ylim has to be set before this)
-            for swap_gen, env_idx in pop.env.active_env:
-                ax.axvline(x=swap_gen+(1 if xlog else 0), color='gray', linestyle='--', linewidth=1)
-                label = 'A' if env_idx == 'A' else 'B'
-                y_pos = ax.get_ylim()[1] # *0.96
-                ax.text(swap_gen+(1 if xlog else 0), y_pos, label, color='gray', ha='center', va='bottom', fontsize=10) # -ax.get_xlim()[1]*0.015 + 
-            
-        plt.xlabel("generations")
+            ax2.set_ylim(-0.05, 1.05)
+            ax3.set_ylim(-0.05, math.log2(numClades + 1))
 
-        #plt.figlegend(bbox_to_anchor=(1.05, 1.0), loc='upper left')
-        #print(f"pop {idx} env: {pop.env.active_env}")
+        plt.figlegend(handles=handles, labels=labels,
+                    loc='upper center', bbox_to_anchor=(0.5, -0.05),
+                    fancybox=True, shadow=True, ncol=3)
 
-    #ax = axes[numPops]
-    #ax.plot(grid.pops[0].envs)
 
-    plt.figlegend(handles=handles, labels=labels, loc='outside right center')
-    #plt.tight_layout()
-    #plt.savefig(f"output/plotx.png", dpi=300)
-    plt.show()
+    if True: # plot counts over time
+        fig, axes = plt.subplots(numPops, layout='constrained', figsize=(4.0, numPops*4.0)) # 6.4x numPops*4.8.
+        if numPops == 1: axes = [axes]
+        fig.suptitle(f"N={strN}, s={e_format(s)}, T={e_format(T)}{" (multiple runs)" if numRuns>1 else ""}")
 
+        for r in range(numRuns): # each independent run
+            grid = runs[r].grid
+            args = runs[r].args
+
+            lw = 1
+            lsA = "-"
+            lsB = "--"
+            for idx, pop in enumerate(grid.pops): # each deme in the grid
+                ax = axes[idx]
+                for idx2, clade in enumerate(pop.clades): # each clade in each pop
+                    # Fixed colors: M2 is red, M3 is green, M4 is blue, M5 is magenta, M6 is cyan, M7 is orange, 
+                    # darker shade for allele A, lighter shade for allele B
+                    shades = [scale_lightness(colors[clade.m + minMu - 2], scale) for scale in [0.5, .75, 1., 1.25, 1.5]]
+                    if idx==0: # with handles and labels
+                        if args.plotAB: # break out A and B
+                            # plot A only
+                            handles.append(ax.plot(clade.countsA, color=shades[1], linestyle=lsA, linewidth=lw)[0])
+                            if r == 0: # only add labels once
+                                labels.append(r"$\mathit{M}_{{%d}},A$" % (clade.m + minMu))
+                            if not args.hideB:
+                                # plot B as well as A
+                                handles.append(ax.plot(clade.countsB, color=shades[3], linestyle=lsB, linewidth=lw)[0])
+                                if r == 0: # only add labels once
+                                    labels.append(r"$\mathit{M}_{{%d}},B$" % (clade.m + minMu))
+                        else:
+                            handles.append(ax.plot(clade.counts, color=shades[2], linestyle=lsA, linewidth=lw)[0]) # note [0]
+                            if r == 0: # only add labels once
+                                labels.append(r"$\mathit{M}_{{%d}},(A+B)$" % (clade.m + minMu))
+                    else: # just plot, no handles or labels
+                        if args.plotAB:
+                            ax.plot(clade.countsA, color=shades[1], linestyle=lsA, linewidth=lw)
+                            if not args.hideB:
+                                # plot B as well as A
+                                ax.plot(clade.countsB, color=shades[3], linestyle=lsB, linewidth=lw)
+                        else:
+                            ax.plot(clade.counts, color=shades[2], linestyle=lsA, linewidth=lw)
+                            
+                # formats y axis labels nicely
+                # thanks copilot!
+                from matplotlib.ticker import FuncFormatter
+                ax.get_yaxis().set_major_formatter(FuncFormatter(
+                    lambda x, pos: "0" if x == 0 else (
+                    "{:.0f}".format(x) if (abs(x) >= 1 and abs(x) < 10000) else
+                    ("{:.2g}".format(x) if abs(x) < 1 and abs(x) < 10000 else
+                    "{:.1e}".format(x).replace("e+0", "e").replace("e+", "e").replace("e-0", "e-")))
+                ))
+
+                if idx != numPops-1: # all except bottom plot get no x axis labels
+                    axes[idx].tick_params(labelbottom=False)
+                    #axes[idx].locator_params(axis='x', nbins=5)  # just put 5 major tics
+
+                if numPops > 1:
+                    ax.set_ylabel(f"pop {idx}")
+                else:
+                    ax.set_ylabel("N" if N>0 else "frequency")
+                
+                if xlog:
+                    ax.set_xscale("log", nonpositive='mask')
+
+                if ylog:
+                    ax.set_yscale("log", nonpositive='mask')
+                    if N<0: # for infinite pop
+                        ax.set_ylim(1e-8, 1.5)
+                    else: 
+                        ax.set_ylim(1, 1.5*N) #(N*1e-6, 1.5*N)
+                else:
+                    ax.set_ylim(-0.001*abs(N), 1.005*abs(N))
+                    
+                # print vertical lines and labels for environment swaps
+                # (ylim has to be set before this)
+                for swap_gen, env_idx in pop.env.active_env:
+                    ax.axvline(x=swap_gen+(1 if xlog else 0), color='gray', linestyle='--', linewidth=1)
+                    label = 'A' if env_idx == 'A' else 'B'
+                    y_pos = ax.get_ylim()[1] # *0.96
+                    ax.text(swap_gen+(1 if xlog else 0), y_pos, label, color='gray', ha='center', va='bottom', fontsize=10) # -ax.get_xlim()[1]*0.015 + 
+                
+            plt.xlabel("generations")
+
+            #plt.figlegend(bbox_to_anchor=(1.05, 1.0), loc='upper left')
+            #print(f"pop {idx} env: {pop.env.active_env}")
+
+        #ax = axes[numPops]
+        #ax.plot(grid.pops[0].envs)
+
+        #plt.figlegend(handles=handles, labels=labels, loc='outside right center')
+        plt.figlegend(handles=handles, labels=labels,
+            loc='upper center', bbox_to_anchor=(0.5, -0.05),
+            fancybox=True, shadow=True, ncol=3)
+
+        #plt.tight_layout()
+        #plt.savefig(f"output/plotx.png", dpi=300)
+        plt.show()
+
+def evosim(override_args=DotAccessibleDict()):
+    args, runs = evosim_run(override_args)
+    evosim_plot(args, runs)
 
 if __name__ == '__main__':
     evosim()
