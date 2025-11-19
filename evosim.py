@@ -198,7 +198,8 @@ class Grid():
                 args['aToB'] = aToB
             else:
                 args['env'] = Environment(args, idx=0, sA=s, sB=0.0) # immediately swaps at gen 0
-                args['aToB'] = 1.0-aToB
+                #args['aToB'] = aToB
+                args['aToB'] = 1.0-aToB # reverse initial freq in odd-numbered pops
             pop = Pop(args, idx)
             self.pops.append(pop)
 
@@ -396,7 +397,6 @@ def evosim_run(override_args=DotAccessibleDict()):
     else:
         nproc = min(args.numRuns, os.cpu_count() or 1)
         if True: #args.printStats:
-            print(f"=== Starting {args.numRuns} runs in parallel (using multiprocessing) ===")
             print(f"Using {nproc} processes for {args.numRuns} runs.")
         # deepcopy args for each run so worker-local mutations don't interfere
         arg_list = [copy.deepcopy(args) for _ in range(args.numRuns)]
@@ -412,25 +412,26 @@ def evosim_plot(args, runs):
 
     strN = "Inf" if N < 0 else f"{e_format(N)}"
     colors = [col.ColorConverter.to_rgb(x) for x in ["red", "green", "blue", "magenta", "cyan", "#ff9933", "black"]]
-
-    labels = []
-    handles = []
     
     xlog = args.plotLog
     ylog = args.plotLog
     
+    lw = 1
+    lsA = "-"
+    lsB = "--"
+
     if True: # plot counts over time
+        labels = []
+        handles = []
+
         fig, axes = plt.subplots(numPops, layout='constrained', figsize=(4.0, numPops*4.0)) # 6.4x numPops*4.8.
         if numPops == 1: axes = [axes]
-        fig.suptitle(f"N={strN}, s={e_format(s)}, T={e_format(T)}{" (multiple runs)" if numRuns>1 else ""}")
+        fig.suptitle(f"N={strN}, s={e_format(s)}, T={e_format(T)}{f" ({numRuns} runs)" if numRuns>1 else ""}")
 
         for r in range(numRuns): # each independent run
             grid = runs[r].grid
             args = runs[r].args
 
-            lw = 1
-            lsA = "-"
-            lsB = "--"
             for idx, pop in enumerate(grid.pops): # each deme in the grid
                 ax = axes[idx]
                 for idx2, clade in enumerate(pop.clades): # each clade in each pop
@@ -494,11 +495,12 @@ def evosim_plot(args, runs):
                     
                 # print vertical lines and labels for environment swaps
                 # (ylim has to be set before this)
-                for swap_gen, env_idx in pop.env.active_env:
-                    ax.axvline(x=swap_gen+(1 if xlog else 0), color='gray', linestyle='--', linewidth=1)
-                    label = 'A' if env_idx == 'A' else 'B'
-                    y_pos = ax.get_ylim()[1] # *0.96
-                    ax.text(swap_gen+(1 if xlog else 0), y_pos, label, color='gray', ha='center', va='bottom', fontsize=10) # -ax.get_xlim()[1]*0.015 + 
+                if r == 0:
+                    for swap_gen, env_idx in pop.env.active_env:
+                        ax.axvline(x=swap_gen+(1 if xlog else 0), color='gray', linestyle='--', linewidth=1)
+                        label = 'A' if env_idx == 'A' else 'B'
+                        y_pos = ax.get_ylim()[1] # *0.96
+                        ax.text(swap_gen+(1 if xlog else 0), y_pos, label, color='gray', ha='center', va='bottom', fontsize=10) # -ax.get_xlim()[1]*0.015 + 
                 
             plt.xlabel("generations")
 
@@ -517,10 +519,15 @@ def evosim_plot(args, runs):
         #plt.savefig(f"output/plotx.png", dpi=300)
         plt.show()
     
-
+    ###
+    
+    # compute and plot fit, surv, surprisal for each clade, at each time, averaged over runs
+    # fitness stats are for entire clades, not types. Because we might start with 0 of any type
     if args.plotKFit:
-        # compute and plot fit, surv, surprisal for each clade, at each time, averaged over runs
-        # fitness stats are for entire clades, not types. Because we might start with 0 of any type
+        labels = []
+        handles = []
+
+        allp = np.zeros((numPops, numClades, numRuns, T*numEpochs))
         for r in range(numRuns):
             grid = runs[r].grid
             args = runs[r].args
@@ -544,38 +551,31 @@ def evosim_plot(args, runs):
                     clade_r = pop.clades[idx2]
                     clade.avgFit += clade_r.fit
                     clade.avgSurv += clade_r.surv
+                    allp[idx][idx2][r] = clade_r.surv # the prob that clade idx2 survives at time t in run r
                 clade.avgFit /= float(numRuns)
                 clade.avgSurv /= float(numRuns)
                 clade.surprisal = -clade.avgSurv*np.log2(clade.avgSurv + 1e-12) - (1.0 - clade.avgSurv)*np.log2(1.0 - clade.avgSurv + 1e-12)
             
-            # compute prob that each clade survives, at each run, at each time t
-            p = np.zeros((numClades, numRuns, T*numEpochs))
-            for idx2, clade in enumerate(pop.clades):
-                for r in range(numRuns):
-                    grid = runs[r].grid
-                    pop = grid.pops[idx]
-                    clade_r = pop.clades[idx2]
-                    p[idx2][r] = clade_r.surv # the prob that clade idx2 survives at time t in run r
-            
-            # compute joint surprisal over all clades
-            joint_surprisal = np.zeros(T*numEpochs)
-            numStates = 2**numClades
-            for t in range(T*numEpochs):
-                joint_surv = np.zeros(numStates)
+        # compute joint surprisal over all clades for all run
+        joint_surprisal = np.zeros((numPops, T*numEpochs))
+        numStates = 2**numClades
+        for t in range(T*numEpochs):
+            for idx, pop in enumerate(grid.pops):
+                joint_surv = np.zeros(numStates) # for this whole pop at time t
                 for state in range(numStates):
                     prob = 1.0 # will hold the probability of this joint state at time t
-                    for idx2 in range(numClades):
+                    for idx2, clade in enumerate(pop.clades): # each clade in each pop
                         if (state >> idx2) & 1: # clade idx2 survives in this state
-                            prob = prob * p[idx2][:, t] # the prob that clade idx2 survives at time t in all runs
+                            prob = prob * allp[idx][idx2][:, t] # the prob that clade idx2 survives at time t in all runs
                         else: # clade idx2 does NOT survive in this state
-                            prob = prob * (1.0 - p[idx2][:, t]) # the prob that clade idx2 does NOT survive at time t in all runs
+                            prob = prob * (1.0 - allp[idx][idx2][:, t]) # the prob that clade idx2 does NOT survive at time t in all runs
                     joint_surv[state] = np.mean(prob) # average over runs
-                joint_surprisal[t] = -np.sum(joint_surv * np.log2(joint_surv + 1e-12))
+                joint_surprisal[idx][t] = -np.sum(joint_surv * np.log2(joint_surv + 1e-12)) 
 
 
         # now plot the avg fit (left axis) and surv (right axis) data, with one row for each pop
         fig, axes = plt.subplots(numPops, 3, layout='constrained', figsize=(3*4.0, numPops*4.0)) # Adjust figsize as needed
-        fig.suptitle(f"N={strN}, s={e_format(s)}, T={e_format(T)}{" (multiple runs)" if numRuns>1 else ""}")
+        fig.suptitle(f"N={strN}, s={e_format(s)}, T={e_format(T)}{f" ({numRuns} runs)" if numRuns>1 else ""}")
         for idx, pop in enumerate(grid.pops): # each deme in the grid
             if numPops == 1:
                 ax1, ax2, ax3 = axes[0], axes[1], axes[2]
@@ -594,7 +594,7 @@ def evosim_plot(args, runs):
                 ax2.plot(clade.avgSurv, color=shades[2], linestyle=lsA, linewidth=lw)
                 ax3.plot(clade.surprisal, color=shades[2], linestyle=lsA, linewidth=lw)
             # plot joint surprisal
-            ax3.plot(joint_surprisal, color='red', linestyle=':', linewidth=2, label='joint')
+            ax3.plot(joint_surprisal[idx], color='#ff4d00', linestyle=':', linewidth=lw, label='joint')
 
             ax1.set_ylabel("W_k(0)")
             ax2.set_ylabel("S_k(0)")
