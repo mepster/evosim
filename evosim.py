@@ -426,7 +426,7 @@ def evosim_plot(args, runs):
 
         fig, axes = plt.subplots(numPops, layout='constrained', figsize=(4.0, numPops*4.0)) # 6.4x numPops*4.8.
         if numPops == 1: axes = [axes]
-        fig.suptitle(f"N={strN}, s={e_format(s)}, T={e_format(T)}{f" ({numRuns} runs)" if numRuns>1 else ""}")
+        fig.suptitle(f"N={strN}, s={e_format(s)}, T={e_format(T)}"+f" ({numRuns} runs)" if numRuns>1 else "")
 
         for r in range(numRuns): # each independent run
             grid = runs[r].grid

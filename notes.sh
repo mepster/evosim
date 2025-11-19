@@ -29,7 +29,7 @@ JU=root ; WD=/root ; docker exec --user $JU -w $WD -it tljh-dev /bin/bash
 # set up user directories on tljh as root
 JU=root ; WD=/root ; docker exec --user $JU -w $WD -it tljh-dev /bin/bash
 # now on docker
-i=7; while [ "$i" -le 10 ]; do
+i=1; while [ "$i" -le 10 ]; do
     export JU="jupyter-user${i}"
     echo $JU
     cp .bashrc .profile /home/$JU
@@ -42,13 +42,16 @@ i=7; while [ "$i" -le 10 ]; do
 
 # reset all users' evosim repos
 # on laptop
-i=1; while [ "$i" -le 10 ]; do
-    export JU="jupyter-user${i}"
-    echo $JU
-    docker exec --user $JU -it -w /home/$JU/evosim tljh-dev /bin/bash -exec "git checkout -f ; git pull ; git checkout -f"
-    #docker exec --user $JU -it -w /home/$JU/evosim tljh-dev /bin/bash -exec "/opt/miniforge3/bin/conda env list"
-    i=$((i+1))
-    done
+export CMD="git pull ; git checkout -f"
+for id in admin $(seq 1 10); do
+    if [ "$id" = "admin" ]; then
+        JU="jupyter-admin"
+    else
+        JU="jupyter-user${id}"
+    fi
+    echo "$JU"
+    docker exec --user "$JU" -it -w "/home/$JU/evosim" tljh-dev /bin/bash -exec "$CMD"
+done
 
 # run any CMD as each user
 # on laptop
