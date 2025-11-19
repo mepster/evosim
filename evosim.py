@@ -376,6 +376,9 @@ def evosim_run(override_args=DotAccessibleDict()):
     sT = abs(s*T)
     print(f"sT:{sT} is low < 20.0 (fixation WON'T usually happen in one epoch)" if sT < 20.0 else f"sT:{sT} is high >= 20.0 (fixation CAN happen in one epoch (ignoring mutation))")
     
+    if args.mode == 'migration':
+        print(f"Running in MIGRATION mode with {numPops} populations")
+        
     # numRuns must be 1 with infinite pop, because runs are identical
     if N < 0:
         args.numRuns = 1
@@ -418,54 +421,31 @@ def evosim_plot(args, runs):
     
     if args.plotFit:
         # compute and plot fit, surv, surprisal for each clade, at each time, averaged over runs
+        # fitness stats are for entire clades, not types. Because we might start with 0 of any type
         for r in range(numRuns):
             grid = runs[r].grid
             args = runs[r].args
             for idx, pop in enumerate(grid.pops):
                 for idx2, clade in enumerate(pop.clades):
-                    print("ZZZZZZ")
-                    print("QQQQQ",len(clade.counts), clade.counts[0], clade.counts[1])
                     if N < 0:
-                        print("XXXXX")
-                        #clade.fitA = clade.countsA / clade.countsA[0]
-                        #clade.fitB = clade.countsB / clade.countsB[0]
                         clade.fit = np.array(clade.counts) / clade.counts[0]  # fitness (i.e., relative to initial count) for clade idx2 in pop idx over t
-                        #clade.survA = np.array([1.0 if x>0 else 0.0 for x in clade.countsA])
-                        #clade.survB = np.array([1.0 if x>0 else 0.0 for x in clade.countsB])
                         clade.surv = np.array([1.0 if x>0 else 0.0 for x in clade.counts]) # survival for clade idx2 in pop idx over t
                     else:
-                        print("YYYYY")
-                        #clade.fitA = clade.countsA / clade.countsA[0]
-                        #clade.fitB = clade.countsB / clade.countsB[0]
                         clade.fit = np.array(clade.counts) / clade.counts[0]  # fitness (i.e., relative to initial count) for clade idx2 in pop idx over t
-                        #clade.survA = np.array([1.0 if x>0 else 0.0 for x in clade.countsA])
-                        #clade.survB = np.array([1.0 if x>0 else 0.0 for x in clade.countsB])
                         clade.surv = np.array([1.0 if x>0 else 0.0 for x in clade.counts]) # survival for clade idx2 in pop idx over t
 
         # now compute across-run averages
         for idx, pop in enumerate(grid.pops):
             for idx2, clade in enumerate(pop.clades):
-                #clade.avgFitA = np.zeros_like(clade.fitA)
-                #clade.avgFitB = np.zeros_like(clade.fitB)
                 clade.avgFit = np.zeros_like(clade.fit)
-                #clade.avgSurvA = np.zeros_like(clade.survA)
-                #clade.avgSurvB = np.zeros_like(clade.survB)
                 clade.avgSurv = np.zeros_like(clade.surv)
                 for r in range(numRuns):
                     grid = runs[r].grid
                     pop = grid.pops[idx]
                     clade_r = pop.clades[idx2]
-                    #clade.avgFitA += clade_r.fitA
-                    #clade.avgFitB += clade_r.fitB
                     clade.avgFit += clade_r.fit
-                    #clade.avgSurvA += clade_r.survA
-                    #clade.avgSurvB += clade_r.survB
                     clade.avgSurv += clade_r.surv
-                #clade.avgFitA /= float(numRuns)
-                #clade.avgFitB /= float(numRuns)
                 clade.avgFit /= float(numRuns)
-                #clade.avgSurvA /= float(numRuns)
-                #clade.avgSurvB /= float(numRuns)
                 clade.avgSurv /= float(numRuns)
                 clade.surprisal = -clade.avgSurv*np.log2(clade.avgSurv + 1e-12) - (1.0 - clade.avgSurv)*np.log2(1.0 - clade.avgSurv + 1e-12)
             
