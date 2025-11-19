@@ -289,14 +289,59 @@ class Grid():
             raise Exception(f"invalid mode: {self.mode}")
 
 
-default_args = DotAccessibleDict({'numPops': 1, 'N': 1e5, 'minMu':2, 'numClades': 1, 'aToB': 0.5, 'T':1e3, 'numEpochs':1, \
-                's':0.1, 'includeMutation': True, 'plotLog': False, 'plotAB': True, 'printStats': False, 'stochasticEnv': False})
+default_args = DotAccessibleDict({'numPops': 1, 'N': 1e5, 'minMu':2, 'numClades': 1, 'aToB': 0.5, 'T':1e3, 's':0.1, \
+                'numEpochs':1, 'numRuns':1, 'includeMutation': True, 'stochasticEnv': False, \
+                'plotLog': False, 'plotAB': True, 'hideB': False, 'printStats': False})
 
 def round_to_int(x, name):
     rounded = round(x)
     if rounded != x:
         print(f"note: rounding {name} to {rounded}!")
     return rounded
+
+def one_run(args):
+    grid = Grid(args)
+
+    for gen in range(int(args.numEpochs*args.T)):
+        grid.one_gen(gen, args.T)
+    
+    run = DotAccessibleDict()
+    run.args = args
+    run.grid = grid
+    
+    return run
+
+def check_args(default_args, override_args):
+    #print("default_args:", default_args)
+    #print("override_args:", override_args)
+
+    unknown_keys = set(override_args.keys()) - set(default_args.keys())
+    if unknown_keys:
+        raise KeyError(f"Unknown argument keys: {sorted(unknown_keys)}")
+
+    args = DotAccessibleDict(default_args.copy())
+    args.update(override_args)
+    #print("args:", args)
+
+    # check constraints on arguments
+    assertx(args.N <0 or args.N >=10, "N must be -1 (which means infinite pop) or >=10")
+    assertx(args.N <= 1e9, "N must be <= 1e9")
+    assertx(args.minMu >=2 and args.minMu <=8, "minMu must be between 2 and 8")
+    assertx(args.numClades >=1 and args.minMu+args.numClades <=9, "numClades must be >= 1, and minMu+numClades must be <=9")
+    assertx(args.numPops >= 1, "numPops must be 1 for mutation mode, or >=1 for migration mode")
+    assertx((args.aToB >= 0 and args.aToB <= 1.0), "aToB must be between 0.0 and 1.0")
+
+    args['mode'] = 'mutation' if args['numPops'] == 1 else 'migration' # might change this later
+    args.N = round_to_int(args.N, "N")
+    args.numPops = round_to_int(args.numPops, "numPops")
+    args.minMu = round_to_int(args.minMu, "minMu")
+    args.numClades = round_to_int(args.numClades, "numClades")
+    args.s = args.s
+    args.T = args.T = round_to_int(args.T, "T")
+    args.numEpochs = round_to_int(args.numEpochs, "numEpochs")
+    args.numRuns = round_to_int(args.numRuns, "numRuns")
+    
+    return args
 
 #@timeit
 def evosim(override_args=DotAccessibleDict()):
@@ -313,35 +358,12 @@ def evosim(override_args=DotAccessibleDict()):
     # plotLog: if True, use log scale for plots
     # plotAB: if True, plot A and B genotypes separately; if False, plot total (A+B)
     # printStats: if True, print grid stats at start of each epoch
+    # numRuns: number of independent simulation runs to perform
 
-    #print("user_args:", user_args)
-    #print("default_args:", default_args)
-    # merge args with default_args, overriding default_args
-    unknown_keys = set(override_args.keys()) - set(default_args.keys())
-    if unknown_keys:
-        raise KeyError(f"Unknown argument keys: {sorted(unknown_keys)}")
-    args = DotAccessibleDict(default_args.copy())
-    args.update(override_args)
-    #print("args:", args)
-
-    N = round_to_int(args.N, "N")
-    numPops = round_to_int(args.numPops, "numPops")
-    minMu = round_to_int(args.minMu, "minMu")
-    numClades = round_to_int(args.numClades, "numClades")
-    s = args.s
-    T = args.T = round_to_int(args.T, "T")
-    numEpochs = round_to_int(args.numEpochs, "numEpochs")
-    aToB = args.aToB
-
-    # check constraints on arguments
-    assertx(N <0 or N >=10, "N must be -1 (which means infinite pop) or >=10")
-    assertx(N <= 1e9, "N must be <= 1e9")
-    assertx(minMu >=2 and minMu <=8, "minMu must be between 2 and 8")
-    assertx(numClades >=1 and minMu+numClades <=9, "numClades must be >= 1, and minMu+numClades must be <=9")
-    assertx(numPops >= 1, "numPops must be 1 for mutation mode, or >=1 for migration mode")
-    assertx((aToB >= 0 and aToB <= 1.0), "aToB must be between 0.0 and 1.0")
-    args['mode'] = 'mutation' if args['numPops'] == 1 else 'migration' # might change this later
-
+    args = check_args(default_args, override_args)
+    N, numPops, minMu, numClades, s, T, numEpochs, aToB, numRuns = \
+        args.N, args.numPops, args.minMu, args.numClades, args.s, args.T, args.numEpochs, args.aToB, args.numRuns
+        
     if N>0:
         Ns = abs(N*s)
         print(f"Ns:{Ns} is low < 10.0 (selection is WEAK relative to drift)" if Ns < 10.0 else f"Ns:{Ns} is high >= 10.0 (selection is STRONG relative to drift)")
@@ -351,21 +373,23 @@ def evosim(override_args=DotAccessibleDict()):
     print(f"sT:{sT} is low < 20.0 (fixation WON'T usually happen in one epoch)" if sT < 20.0 else f"sT:{sT} is high >= 20.0 (fixation CAN happen in one epoch (ignoring mutation))")
 
 
-    ## run simulation
-    
-    grid = Grid(args)
+    ## run numRuns independent simulations
+    runs = []
+    for r in range(numRuns):
+        if args.printStats:
+            print(f"=== Starting run {r+1} of {numRuns} ===")
+        run = one_run(args)
+        runs.append(run)
 
-    for gen in range(int(numEpochs*T)):
-        grid.one_gen(gen, T)
 
-    ## plot simulation
+    ## plot simulations
 
     strN = "Inf" if N < 0 else f"{e_format(N)}"
     colors = [col.ColorConverter.to_rgb(x) for x in ["red", "green", "blue", "magenta", "cyan", "#ff9933", "black"]]
 
     fig, axes = plt.subplots(numPops, layout='constrained', figsize=(8.0, numPops*4.0)) # 6.4x numPops*4.8.
     if numPops == 1: axes = [axes]
-    fig.suptitle(f"N={strN}, s={e_format(s)}, T={e_format(T)}")
+    fig.suptitle(f"N={strN}, s={e_format(s)}, T={e_format(T)}{" (multiple runs)" if numRuns>1 else ""}")
 
     labels = []
     handles = []
@@ -373,62 +397,83 @@ def evosim(override_args=DotAccessibleDict()):
     xlog = args.plotLog
     ylog = args.plotLog
     
-    for idx, pop in enumerate(grid.pops):
-        ax = axes[idx]
-        for idx2, clade in enumerate(pop.clades):
-            # Fixed colors: M2 is red, M3 is green, M4 is blue, M5 is magenta, M6 is cyan, M7 is orange, 
-            # darker shade for allele A, lighter shade for allele B
-            shades = [scale_lightness(colors[clade.m + minMu - 2], scale) for scale in [0.5, .75, 1., 1.25, 1.5]]
-            if idx==0: # with handles and labels
-                if args.plotAB:
-                    handles.append(ax.plot(clade.countsA, color=shades[1], linestyle="-")[0])
-                    labels.append(r"$\mathit{M}_{{%d}},A$" % (clade.m + minMu))
-                    handles.append(ax.plot(clade.countsB, color=shades[3], linestyle="--")[0])
-                    labels.append(r"$\mathit{M}_{{%d}},B$" % (clade.m + minMu))
-                else:
-                    handles.append(ax.plot(clade.counts, color=shades[2], linestyle="-")[0]) # note [0]
-                    labels.append(r"$\mathit{M}_{{%d}},(A+B)$" % (clade.m + minMu))
+    for r in range(numRuns): # each independent run
+        grid = runs[r].grid
+        args = runs[r].args
+
+        lw = 1
+        lsA = "-"
+        lsB = "--"
+        for idx, pop in enumerate(grid.pops): # each deme in the grid
+            ax = axes[idx]
+            for idx2, clade in enumerate(pop.clades): # each clade in each pop
+                # Fixed colors: M2 is red, M3 is green, M4 is blue, M5 is magenta, M6 is cyan, M7 is orange, 
+                # darker shade for allele A, lighter shade for allele B
+                shades = [scale_lightness(colors[clade.m + minMu - 2], scale) for scale in [0.5, .75, 1., 1.25, 1.5]]
+                if idx==0: # with handles and labels
+                    if args.plotAB: # break out A and B
+                        # plot A only
+                        handles.append(ax.plot(clade.countsA, color=shades[1], linestyle=lsA, linewidth=lw)[0])
+                        if r == 0: # only add labels once
+                            labels.append(r"$\mathit{M}_{{%d}},A$" % (clade.m + minMu))
+                        if not args.hideB:
+                            # plot B as well as A
+                            handles.append(ax.plot(clade.countsB, color=shades[3], linestyle=lsB, linewidth=lw)[0])
+                            if r == 0: # only add labels once
+                                labels.append(r"$\mathit{M}_{{%d}},B$" % (clade.m + minMu))
+                    else:
+                        handles.append(ax.plot(clade.counts, color=shades[2], linestyle=lsA, linewidth=lw)[0]) # note [0]
+                        if r == 0: # only add labels once
+                            labels.append(r"$\mathit{M}_{{%d}},(A+B)$" % (clade.m + minMu))
+                else: # just plot, no handles or labels
+                    if args.plotAB:
+                        ax.plot(clade.countsA, color=shades[1], linestyle=lsA, linewidth=lw)
+                        if not args.hideB:
+                            # plot B as well as A
+                            ax.plot(clade.countsB, color=shades[3], linestyle=lsB, linewidth=lw)
+                    else:
+                        ax.plot(clade.counts, color=shades[2], linestyle=lsA, linewidth=lw)
+                        
+            # formats y axis labels nicely
+            # thanks copilot!
+            from matplotlib.ticker import FuncFormatter
+            ax.get_yaxis().set_major_formatter(FuncFormatter(
+                lambda x, pos: "0" if x == 0 else (
+                "{:.0f}".format(x) if (abs(x) >= 1 and abs(x) < 10000) else
+                ("{:.2g}".format(x) if abs(x) < 1 and abs(x) < 10000 else
+                "{:.1e}".format(x).replace("e+0", "e").replace("e+", "e").replace("e-0", "e-")))
+            ))
+
+            if idx != numPops-1: # all except bottom plot get no x axis labels
+                axes[idx].tick_params(labelbottom=False)
+            axes[idx].locator_params(axis='x', nbins=5)  # just put 5 major tics
+
+            if numPops > 1:
+                ax.set_ylabel(f"pop {idx}")
             else:
-                if args.plotAB:
-                    ax.plot(clade.countsA, color=shades[1], linestyle="-")
-                    ax.plot(clade.countsB, color=shades[3], linestyle="--")
-                else:
-                    ax.plot(clade.counts, color=shades[2], linestyle="-")
-        ax.locator_params(axis='x', nbins=5)  # just put 5 major tics
-        
-        # formats y axis labels nicely
-        # thanks copilot!
-        from matplotlib.ticker import FuncFormatter
-        ax.get_yaxis().set_major_formatter(FuncFormatter(
-            lambda x, pos: "0" if x == 0 else (
-            "{:.0f}".format(x) if (abs(x) >= 1 and abs(x) < 10000) else
-            ("{:.2g}".format(x) if abs(x) < 1 and abs(x) < 10000 else
-            "{:.1e}".format(x).replace("e+0", "e").replace("e+", "e").replace("e-0", "e-")))
-        ))
-        
-        if xlog:
-            ax.set_xscale("log", nonpositive='mask')
+                ax.set_ylabel("N" if N>0 else "frequency")
+            
+            if xlog:
+                ax.set_xscale("log", nonpositive='mask')
 
-        if ylog:
-            ax.set_yscale("log", nonpositive='mask')
-            if N<0: # for infinite pop
-                ax.set_ylim(1e-8, 1.5)
-            else: 
-                ax.set_ylim(1, 1.5*N) #(N*1e-6, 1.5*N)
-        else:
-            ax.set_ylim(-0.001*abs(N), 1.005*abs(N))
-        for swap_gen, env_idx in pop.env.active_env:
-            ax.axvline(x=swap_gen+(1 if xlog else 0), color='gray', linestyle='--', linewidth=1)
-            label = 'A' if env_idx == 'A' else 'B'
-            y_pos = ax.get_ylim()[1] # *0.96
-            ax.text(swap_gen+(1 if xlog else 0), y_pos, label, color='gray', ha='center', va='bottom', fontsize=10) # -ax.get_xlim()[1]*0.015 + 
-
-        plt.ylabel("N" if N>0 else "frequency")
+            if ylog:
+                ax.set_yscale("log", nonpositive='mask')
+                if N<0: # for infinite pop
+                    ax.set_ylim(1e-8, 1.5)
+                else: 
+                    ax.set_ylim(1, 1.5*N) #(N*1e-6, 1.5*N)
+            else:
+                ax.set_ylim(-0.001*abs(N), 1.005*abs(N))
+                
+            # print vertical lines and labels for environment swaps
+            # (ylim has to be set before this)
+            for swap_gen, env_idx in pop.env.active_env:
+                ax.axvline(x=swap_gen+(1 if xlog else 0), color='gray', linestyle='--', linewidth=1)
+                label = 'A' if env_idx == 'A' else 'B'
+                y_pos = ax.get_ylim()[1] # *0.96
+                ax.text(swap_gen+(1 if xlog else 0), y_pos, label, color='gray', ha='center', va='bottom', fontsize=10) # -ax.get_xlim()[1]*0.015 + 
+            
         plt.xlabel("generations")
-        [axes[idx].tick_params(labelbottom=False) for idx in range(numPops-1)]
-
-        if numPops > 1:
-            ax.set_ylabel(f"pop {idx}")
 
         #plt.figlegend(bbox_to_anchor=(1.05, 1.0), loc='upper left')
         #print(f"pop {idx} env: {pop.env.active_env}")
