@@ -424,7 +424,7 @@ def evosim_plot(args, runs):
         labels = []
         handles = []
 
-        fig, axes = plt.subplots(numPops, layout='constrained', figsize=(4.0, numPops*4.0)) # 6.4x numPops*4.8.
+        fig, axes = plt.subplots(numPops, layout='constrained', figsize=(4.0, 4.0)) #numPops*4.0)) # 6.4x numPops*4.8.
         if numPops == 1: axes = [axes]
         fig.suptitle(f"N={strN}, s={e_format(s)}, T={e_format(T)}"+f" ({numRuns} runs)" if numRuns>1 else "")
 
@@ -574,7 +574,7 @@ def evosim_plot(args, runs):
 
 
         # now plot the avg fit (left axis) and surv (right axis) data, with one row for each pop
-        fig, axes = plt.subplots(numPops, 3, layout='constrained', figsize=(3*4.0, numPops*4.0)) # Adjust figsize as needed
+        fig, axes = plt.subplots(numPops, 3, layout='constrained', figsize=(3*4.0, 4.0)) #numPops*4.0)) # Adjust figsize as needed
         fig.suptitle(f"N={strN}, s={e_format(s)}, T={e_format(T)}"+f" ({numRuns} runs)" if numRuns>1 else "")
         for idx, pop in enumerate(grid.pops): # each deme in the grid
             if numPops == 1:
