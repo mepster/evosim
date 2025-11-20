@@ -58,7 +58,7 @@ done
 # on laptop
 #export CMD="ls"
 #export CMD="/opt/miniforge3/bin/conda env list"
-export CMD="git pull ; git checkout -f"
+export CMD="git checkout -f ; git pull ; git checkout -f"
 for id in admin $(seq 1 10); do
     if [ "$id" = "admin" ]; then
         JU="jupyter-admin"
