@@ -395,7 +395,8 @@ def evosim_run(override_args=DotAccessibleDict()):
             run = one_run(copy.deepcopy(args))
             runs.append(run)
     else:
-        nproc = min(args.numRuns, os.cpu_count() or 1)
+        maxProcs = 8 # hard limit
+        nproc = min(maxProcs, min(args.numRuns, os.cpu_count() or 1))
         if True: #args.printStats:
             print(f"Using {nproc} processes for {args.numRuns} runs.")
         # deepcopy args for each run so worker-local mutations don't interfere
