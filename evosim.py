@@ -224,6 +224,7 @@ class Grid():
 
     def migrate(self):
         # apply migration between populations - in frequency space
+        # this does work correctly for any numPops >= 2
         if self.numPops == 1: # there's just one population, skip migration
             return
 
@@ -238,24 +239,25 @@ class Grid():
                 current[j][i][1] = clade.nB
                 mig[j][i][0] = clade.mu
                 mig[j][i][1] = clade.mu
-        #print("current\n", current)
-        #print("mig\n", mig)
+        #print(f"current shape:{current.shape}\n{current}\n")
+        #print(f"mig shape:{mig.shape}\n{mig}\n")
 
         # go is the frequencies of how many leave each pop
-        go = np.multiply(current, mig)
-        #print("go\n", go)
+        go = np.multiply(current, mig) # this is element-wise multiplication, not matrix-matrix multiplication
+        #print(f"emmigrate shape:{go.shape}\n{go}\n")
 
         # final is current frequencies, minus those that go
         final = current - go
 
         # this fraction go to each other (i!=j) pop
         go = go/float(self.numPops-1.0)
+        #print(f"immigrate shape:{go.shape}\n{go}\n")
         for i in range(self.numPops):
             for j in range(self.numPops):
                 if i!=j:
                     final[i] = final[i] + go[j]
 
-        #print("final\n", final)
+        #print(f"final shape:{final.shape}\n{final}\n")
 
         # copy final back into pop
         for j, pop in enumerate(self.pops):
@@ -504,7 +506,27 @@ def evosim_plot(args, runs):
         #plt.savefig(f"output/plotx.png", dpi=300)
         plt.show()
     
-def evosim_plot_kfit(args, runs):
+def evosim_plot_kfit(args_orig, runs_orig):
+
+    # If numPops > 1, collapse all the counts into pop 0 (for each run, for each clade).
+    # We want to treat all the populations as one big population for the purposes of fitness/survival analysis.
+    if args_orig.numPops > 1:
+        args = copy.deepcopy(args_orig) # to avoid modifying original data
+        runs = copy.deepcopy(runs_orig) # to avoid modifying original data
+        for r in range(args.numRuns):
+            grid = runs[r].grid
+            for idx, pop in enumerate(grid.pops):
+                for idx2, clade in enumerate(pop.clades):
+                    if idx != 0:
+                        grid.pops[0].clades[idx2].counts = np.add(grid.pops[0].clades[idx2].counts, clade.counts)
+            grid.pops = [grid.pops[0]] # keep only pop 0
+            grid.numPops = 1
+        args.numPops = 1
+        # now proceed as if there were just one pop!
+    else:
+        args = args_orig
+        runs = runs_orig
+
     N, numPops, minMu, numClades, s, T, numEpochs, aToB, numRuns = \
         args.N, args.numPops, args.minMu, args.numClades, args.s, args.T, args.numEpochs, args.aToB, args.numRuns
 
@@ -515,126 +537,120 @@ def evosim_plot_kfit(args, runs):
 
     # compute and plot fit, surv, surprisal for each clade, at each time, averaged over runs
     # fitness stats are for entire clades, not types. Because we might start with 0 of any type
-    if True:
-        labels = []
-        handles = []
+    labels = []
+    handles = []
 
-        allp = np.zeros((numPops, numClades, numRuns, T*numEpochs))
-        for r in range(numRuns):
-            grid = runs[r].grid
-            args = runs[r].args
-            for idx, pop in enumerate(grid.pops):
-                for idx2, clade in enumerate(pop.clades):
-                    if N < 0:
-                        clade.fit = np.array(clade.counts) / clade.counts[0]  # fitness (i.e., relative to initial count) for clade idx2 in pop idx over t
-                        clade.surv = np.array([1.0 if x>0 else 0.0 for x in clade.counts]) # survival for clade idx2 in pop idx over t
-                    else:
-                        clade.fit = np.array(clade.counts) / clade.counts[0]  # fitness (i.e., relative to initial count) for clade idx2 in pop idx over t
-                        clade.surv = np.array([1.0 if x>0 else 0.0 for x in clade.counts]) # survival for clade idx2 in pop idx over t
-
-        # now compute across-run averages
+    for r in range(numRuns):
+        grid = runs[r].grid
         for idx, pop in enumerate(grid.pops):
             for idx2, clade in enumerate(pop.clades):
-                clade.avgFit = np.zeros_like(clade.fit)
-                clade.avgSurv = np.zeros_like(clade.surv)
-                for r in range(numRuns):
-                    grid = runs[r].grid
-                    pop = grid.pops[idx]
-                    clade_r = pop.clades[idx2]
-                    clade.avgFit += clade_r.fit
-                    clade.avgSurv += clade_r.surv
-                    allp[idx][idx2][r] = clade_r.surv # the prob that clade idx2 survives at time t in run r
-                clade.avgFit /= float(numRuns)
-                clade.avgSurv /= float(numRuns)
-                clade.surprisal = -clade.avgSurv*np.log2(clade.avgSurv + 1e-12) - (1.0 - clade.avgSurv)*np.log2(1.0 - clade.avgSurv + 1e-12)
-            
-        # compute joint surprisal over all clades for all run
-        joint_surprisal = np.zeros((numPops, T*numEpochs))
-        numStates = 2**numClades
-        for t in range(T*numEpochs):
-            for idx, pop in enumerate(grid.pops):
-                joint_surv = np.zeros(numStates) # for this whole pop at time t
-                for state in range(numStates):
-                    prob = 1.0 # will hold the probability of this joint state at time t
-                    for idx2, clade in enumerate(pop.clades): # each clade in each pop
-                        if (state >> idx2) & 1: # clade idx2 survives in this state
-                            prob = prob * allp[idx][idx2][:, t] # the prob that clade idx2 survives at time t in all runs
-                        else: # clade idx2 does NOT survive in this state
-                            prob = prob * (1.0 - allp[idx][idx2][:, t]) # the prob that clade idx2 does NOT survive at time t in all runs
-                    joint_surv[state] = np.mean(prob) # average over runs
-                joint_surprisal[idx][t] = -np.sum(joint_surv * np.log2(joint_surv + 1e-12)) 
+                #print("CC0",clade.counts[0])
+                clade.fit = np.array(clade.counts) / clade.counts[0]  # fitness (i.e., relative to initial count) for clade idx2 in pop idx over t
+                clade.surv = np.array([1.0 if x>0 else 0.0 for x in clade.counts]) # survival for clade idx2 in pop idx over t
 
-
-        # now plot the avg fit (left axis) and surv (right axis) data, with one row for each pop
-        fig, axes = plt.subplots(numPops, 3, layout='constrained', figsize=(3*4.0, 4.0)) #numPops*4.0)) # Adjust figsize as needed
-        fig.suptitle(f"N={strN}, s={e_format(s)}, T={e_format(T)}"+f" ({numRuns} runs)" if numRuns>1 else "")
-        for idx, pop in enumerate(grid.pops): # each deme in the grid
-            if numPops == 1:
-                ax1, ax2, ax3 = axes[0], axes[1], axes[2]
-            else:
-                ax1, ax2, ax3 = axes[idx][0], axes[idx][1], axes[idx][2]
-
-            lw = 1
-            lsA = "-"
-            lsB = "--"
-            for idx2, clade in enumerate(pop.clades): # each clade in each pop
-                # Fixed colors: M2 is red, M3 is green, M4 is blue, M5 is magenta, M6 is cyan, M7 is orange, 
-                # darker shade for allele A, lighter shade for allele B
-                shades = [scale_lightness(colors[clade.m + minMu - 2], scale) for scale in [0.5, .75, 1., 1.25, 1.5]]
-                h = ax1.plot(clade.avgFit, color=shades[2], linestyle=lsA, linewidth=lw)[0] # note [0]
-                if idx == 0:
-                    handles.append(h)
-                    labels.append(r"$\mathit{M}_{{%d}},(A+B)$" % (clade.m + minMu))
-                ax2.plot(clade.avgSurv, color=shades[2], linestyle=lsA, linewidth=lw)
-                ax3.plot(clade.surprisal, color=shades[2], linestyle=lsA, linewidth=lw)
-            # plot joint surprisal
-            ax3.plot(joint_surprisal[idx], color='#ff4d00', linestyle=':', linewidth=lw, label='joint')
-
-            ax1.set_ylabel("W_k(0)")
-            ax2.set_ylabel("S_k(0)")
-            ax3.set_ylabel("H(k)")
-            if numPops > 1:
-                ax1.set_ylabel(f"pop {idx}\nW_k(0)")
-                
-            if idx != numPops-1: # all except bottom plot get no x axis labels
-                ax1.tick_params(labelbottom=False)
-                ax2.tick_params(labelbottom=False)
-                ax3.tick_params(labelbottom=False)
-            ax1.locator_params(axis='x', nbins=5)  # just put 5 major tics
-            ax2.locator_params(axis='x', nbins=5)  # just put 5 major tics
-            ax3.locator_params(axis='x', nbins=5)  # just put 5 major tics
-            ax1.set_xlabel("generation (k)")
-            ax2.set_xlabel("generation (k)")
-            ax3.set_xlabel("generation (k)")
+    # now 1) get the survival p's for all runs in one place, and 2) compute across-run avgFit, avgSurv, surprisal per clade
+    allp = np.zeros((numPops, numClades, numRuns, T*numEpochs))
+    for idx, pop in enumerate(grid.pops):
+        for idx2, clade in enumerate(pop.clades):
+            clade.avgFit = np.zeros_like(clade.fit)
+            clade.avgSurv = np.zeros_like(clade.surv)
+            for r in range(numRuns):
+                grid = runs[r].grid
+                pop = grid.pops[idx]
+                clade_r = pop.clades[idx2]
+                clade.avgFit += clade_r.fit
+                clade.avgSurv += clade_r.surv
+                allp[idx][idx2][r] = clade_r.surv # the prob that clade idx2 survives at time t in run r
+            clade.avgFit /= float(numRuns)
+            clade.avgSurv /= float(numRuns)
+            clade.surprisal = -clade.avgSurv*np.log2(clade.avgSurv + 1e-12) - (1.0 - clade.avgSurv)*np.log2(1.0 - clade.avgSurv + 1e-12)
         
-            if xlog:
-                ax1.set_xscale("log", nonpositive='mask')
-                ax2.set_xscale("log", nonpositive='mask')
-                ax3.set_xscale("log", nonpositive='mask')
-            if ylog:
-                ax1.set_yscale("log", nonpositive='mask')
-                
-            ax2.set_ylim(-0.05, 1.05)
-            ax3.set_ylim(-0.05, math.log2(numClades + 1))
+    # from allp, compute joint surprisal over all joint clade survival states
+    joint_surprisal = np.zeros((numPops, T*numEpochs))
+    numStates = 2**numClades
+    for t in range(T*numEpochs):
+        for idx, pop in enumerate(grid.pops):
+            joint_surv = np.zeros(numStates) # for this whole pop at time t
+            for state in range(numStates):
+                prob = 1.0 # will hold the probability of this joint state at time t
+                for idx2, clade in enumerate(pop.clades): # each clade in each pop
+                    if (state >> idx2) & 1: # clade idx2 survives in this state
+                        prob = prob * allp[idx][idx2][:, t] # the prob that clade idx2 survives at time t in all runs
+                    else: # clade idx2 does NOT survive in this state
+                        prob = prob * (1.0 - allp[idx][idx2][:, t]) # the prob that clade idx2 does NOT survive at time t in all runs
+                joint_surv[state] = np.mean(prob) # average over runs
+            joint_surprisal[idx][t] = -np.sum(joint_surv * np.log2(joint_surv + 1e-12)) 
+
+
+    # now plot the avg fit (left axis) and surv (right axis) data, with one row for each pop
+    fig, axes = plt.subplots(numPops, 3, layout='constrained', figsize=(3*4.0, 4.0)) #numPops*4.0)) # Adjust figsize as needed
+    fig.suptitle(f"N={strN}, s={e_format(s)}, T={e_format(T)}"+f" ({numRuns} runs)" if numRuns>1 else "")
+    for idx, pop in enumerate(grid.pops): # each deme in the grid
+        if numPops == 1:
+            ax1, ax2, ax3 = axes[0], axes[1], axes[2]
+        else:
+            ax1, ax2, ax3 = axes[idx][0], axes[idx][1], axes[idx][2]
+
+        lw = 1
+        lsA = "-"
+        lsB = "--"
+        for idx2, clade in enumerate(pop.clades): # each clade in each pop
+            # Fixed colors: M2 is red, M3 is green, M4 is blue, M5 is magenta, M6 is cyan, M7 is orange, 
+            # darker shade for allele A, lighter shade for allele B
+            shades = [scale_lightness(colors[clade.m + minMu - 2], scale) for scale in [0.5, .75, 1., 1.25, 1.5]]
+            h = ax1.plot(clade.avgFit, color=shades[2], linestyle=lsA, linewidth=lw)[0] # note [0]
+            if idx == 0:
+                handles.append(h)
+                labels.append(r"$\mathit{M}_{{%d}},(A+B)$" % (clade.m + minMu))
+            ax2.plot(clade.avgSurv, color=shades[2], linestyle=lsA, linewidth=lw)
+            ax3.plot(clade.surprisal, color=shades[2], linestyle=lsA, linewidth=lw)
+        # plot joint surprisal
+        ax3.plot(joint_surprisal[idx], color='#ff4d00', linestyle=':', linewidth=lw, label='joint')
+
+        ax1.set_ylabel("W_k(0)")
+        ax2.set_ylabel("S_k(0)")
+        ax3.set_ylabel("H(k)")
+        if numPops > 1:
+            ax1.set_ylabel(f"pop {idx}\nW_k(0)")
             
-            # print vertical lines and labels for environment swaps
-            # (ylim has to be set before this)
-            if r == 0:
-                for swap_gen, env_idx in pop.env.active_env:
-                    for ax in [ax1, ax2, ax3]:
-                        label = 'A' if env_idx == 'A' else 'B'
-                        ax.axvline(x=swap_gen+(1 if xlog else 0), color='gray', linestyle='--', linewidth=1)
-                        ax.text(swap_gen+(1 if xlog else 0), ax.get_ylim()[1], label, color='gray', ha='center', va='bottom', fontsize=10) # -ax.get_xlim()[1]*0.015 + 
-                
-            plt.xlabel("generation (k)")
-
-        plt.figlegend(handles=handles, labels=labels,
-                    loc='center left', bbox_to_anchor=(1.02, 0.5),
-                    fancybox=True, shadow=True, ncol=1, borderaxespad=0.0)
-        #plt.savefig(f"output/plotk.png", dpi=300)
-        plt.show()
-
+        if idx != numPops-1: # all except bottom plot get no x axis labels
+            ax1.tick_params(labelbottom=False)
+            ax2.tick_params(labelbottom=False)
+            ax3.tick_params(labelbottom=False)
+        ax1.locator_params(axis='x', nbins=5)  # just put 5 major tics
+        ax2.locator_params(axis='x', nbins=5)  # just put 5 major tics
+        ax3.locator_params(axis='x', nbins=5)  # just put 5 major tics
+        ax1.set_xlabel("generation (k)")
+        ax2.set_xlabel("generation (k)")
+        ax3.set_xlabel("generation (k)")
     
+        if xlog:
+            ax1.set_xscale("log", nonpositive='mask')
+            ax2.set_xscale("log", nonpositive='mask')
+            ax3.set_xscale("log", nonpositive='mask')
+        if ylog:
+            ax1.set_yscale("log", nonpositive='mask')
+            
+        ax2.set_ylim(-0.05, 1.05)
+        ax3.set_ylim(-0.05, numClades)
+        
+        # print vertical lines and labels for environment swaps
+        # (ylim has to be set before this)
+        if r == 0:
+            for swap_gen, env_idx in pop.env.active_env:
+                for ax in [ax1, ax2, ax3]:
+                    label = 'A' if env_idx == 'A' else 'B'
+                    ax.axvline(x=swap_gen+(1 if xlog else 0), color='gray', linestyle='--', linewidth=1)
+                    ax.text(swap_gen+(1 if xlog else 0), ax.get_ylim()[1], label, color='gray', ha='center', va='bottom', fontsize=10) # -ax.get_xlim()[1]*0.015 + 
+            
+        plt.xlabel("generation (k)")
+
+    plt.figlegend(handles=handles, labels=labels,
+                loc='center left', bbox_to_anchor=(1.02, 0.5),
+                fancybox=True, shadow=True, ncol=1, borderaxespad=0.0)
+    #plt.savefig(f"output/plotk.png", dpi=300)
+    plt.show()
+  
 def evosim(override_args=DotAccessibleDict()):
     args, runs = evosim_run(override_args)
     evosim_plot(args, runs)
