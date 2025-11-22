@@ -12,29 +12,37 @@ import warnings
 warnings.filterwarnings('ignore')
 
 class Environment:
-    def __init__(self, args, idx, sA, sB):
+    def __init__(self, args, state, sA, sB):
         self.args = args
-        self.idx = idx
+        self.state = state # environmental state
         self.sA = sA
         self.sB = sB
         self.active_env = [] # pairs of (gen, env)
+        self.s = args.s
 
     def __repr__(self):
         ret = f"env {self.label()}:\tsA={self.sA}\tsB={self.sB}"
         return ret
 
     def label(self):
-        return "A" if self.idx == 0 else "B"
+        return "A" if self.state == 0 else "B"
 
 
     def swap(self, gen): # swap which allele is favored
-        self.idx = (self.idx+1)%2
-        tmp = self.sA
-        self.sA = self.sB
-        self.sB = tmp
+        self.state = (self.state+1)%2 # increase/wrap state. There are only 2 states as written: 0 and 1
+        assert self.state in [0, 1], f"invalid state: {self.state}"
+        if self.state == 0:
+            self.sA = 0.0
+            self.sB = self.s
+        else:
+            self.sA = self.s
+            self.sB = 0.0
+        #tmp = self.sA
+        #self.sA = self.sB
+        #self.sB = tmp
 
         # log data for plotting
-        self.active_env.append((gen, "A" if self.idx == 0 else "B"))
+        self.active_env.append((gen, "A" if self.state == 0 else "B"))
 
 class Clade:
     # a clade contains two genotypes: A and B, with the same fixed mutation rate
@@ -194,10 +202,10 @@ class Grid():
         self.pops = []
         for idx in range(self.numPops):
             if idx%2 == 0:
-                args['env'] = Environment(args, idx=1, sA=0.0, sB=s)  # immediately swaps at gen 0
+                args['env'] = Environment(args, state=1, sA=0.0, sB=s) # starts B but will immediately swap to A at gen 0
                 args['aToB'] = aToB
             else:
-                args['env'] = Environment(args, idx=0, sA=s, sB=0.0) # immediately swaps at gen 0
+                args['env'] = Environment(args, state=0, sA=s, sB=0.0) # starts A but will immediately swap to B at gen 0
                 #args['aToB'] = aToB
                 args['aToB'] = 1.0-aToB # reverse initial freq in odd-numbered pops
             pop = Pop(args, idx)
@@ -257,21 +265,18 @@ class Grid():
 
     def one_gen(self, gen, epochGen):
         # one generation of evolution for the whole grid
-        # swap environment either:
-        #   at gen==0
-        #   or, if not args.stochasticEnv, then every epochGen generations *exactly*.
-        #   or, if args.stochasticEnv, then every epochGen generations *in expectation*.
-        if gen == 0 or \
-            (not self.args.stochasticEnv and (gen % epochGen == 0)) or \
-            (self.args.stochasticEnv and (random.random() < 1./epochGen)):
-
-            if self.printStats:
-                print(f"gen:{gen} epoch:{int(gen / epochGen)}")# envt:{envt}")
-                #print(f"swap environment to {'A' if self.pops[0].env.idx == 1 else 'B'}")
-            
-            for pop in self.pops:
+        for pop in self.pops:
+            # independenly per pop. swap environment either:
+            # at gen==0, 
+            # or, if not args.stochasticEnv, then every epochGen generations *exactly*.
+            # or, if args.stochasticEnv, then every epochGen generations *in expectation*.
+            if gen == 0 or \
+                (not self.args.stochasticEnv and (gen % epochGen == 0)) or \
+                (self.args.stochasticEnv and (random.random() < 1./epochGen)):
                 # swap environment in each pop
                 pop.env.swap(gen)
+                if self.printStats:
+                    print(f"gen:{gen} epoch:{int(gen / epochGen)} pop:{pop.label} swapped to env:{pop.env.label()}")
 
             if self.printStats:
                 print(self) # start of every epoch
@@ -409,17 +414,12 @@ def evosim_run(override_args=DotAccessibleDict()):
 
 def evosim_plot(args, runs):
     N, numPops, minMu, numClades, s, T, numEpochs, aToB, numRuns = \
-    args.N, args.numPops, args.minMu, args.numClades, args.s, args.T, args.numEpochs, args.aToB, args.numRuns
+        args.N, args.numPops, args.minMu, args.numClades, args.s, args.T, args.numEpochs, args.aToB, args.numRuns
 
     strN = "Inf" if N < 0 else f"{e_format(N)}"
     colors = [col.ColorConverter.to_rgb(x) for x in ["red", "green", "blue", "magenta", "cyan", "#ff9933", "black"]]
-    
-    xlog = args.plotLog
-    ylog = args.plotLog
-    
-    lw = 1
-    lsA = "-"
-    lsB = "--"
+    xlog, ylog = args.plotLog, args.plotLog
+    lw, lsA, lsB = 1, "-", "--"
 
     if True: # plot counts over time
         labels = []
@@ -439,29 +439,23 @@ def evosim_plot(args, runs):
                     # Fixed colors: M2 is red, M3 is green, M4 is blue, M5 is magenta, M6 is cyan, M7 is orange, 
                     # darker shade for allele A, lighter shade for allele B
                     shades = [scale_lightness(colors[clade.m + minMu - 2], scale) for scale in [0.5, .75, 1., 1.25, 1.5]]
-                    if idx==0: # with handles and labels
-                        if args.plotAB: # break out A and B
-                            # plot A only
-                            handles.append(ax.plot(clade.countsA, color=shades[1], linestyle=lsA, linewidth=lw)[0])
-                            if r == 0: # only add labels once
-                                labels.append(r"$\mathit{M}_{{%d}},A$" % (clade.m + minMu))
-                            if not args.hideB:
-                                # plot B as well as A
-                                handles.append(ax.plot(clade.countsB, color=shades[3], linestyle=lsB, linewidth=lw)[0])
-                                if r == 0: # only add labels once
-                                    labels.append(r"$\mathit{M}_{{%d}},B$" % (clade.m + minMu))
-                        else:
-                            handles.append(ax.plot(clade.counts, color=shades[2], linestyle=lsA, linewidth=lw)[0]) # note [0]
-                            if r == 0: # only add labels once
-                                labels.append(r"$\mathit{M}_{{%d}},(A+B)$" % (clade.m + minMu))
-                    else: # just plot, no handles or labels
-                        if args.plotAB:
-                            ax.plot(clade.countsA, color=shades[1], linestyle=lsA, linewidth=lw)
-                            if not args.hideB:
-                                # plot B as well as A
-                                ax.plot(clade.countsB, color=shades[3], linestyle=lsB, linewidth=lw)
-                        else:
-                            ax.plot(clade.counts, color=shades[2], linestyle=lsA, linewidth=lw)
+                    if args.plotAB: # break out A and B
+                        # plot A
+                        h = ax.plot(clade.countsA, color=shades[1], linestyle=lsA, linewidth=lw)[0] # note [0]
+                        if idx == 0 and r == 0: # only add handles and labels once
+                            handles.append(h)
+                            labels.append(r"$\mathit{M}_{{%d}},A$" % (clade.m + minMu))
+                        if not args.hideB:
+                            # plot B too
+                            h = ax.plot(clade.countsB, color=shades[3], linestyle=lsB, linewidth=lw)[0]
+                            if idx == 0 and r == 0: # only add handles and labels once
+                                handles.append(h)
+                                labels.append(r"$\mathit{M}_{{%d}},B$" % (clade.m + minMu))
+                    else: # plot A+B
+                        h = ax.plot(clade.counts, color=shades[2], linestyle=lsA, linewidth=lw)[0] # note [0]
+                        if idx == 0 and r == 0: # only add handles  and labels once
+                            labels.append(r"$\mathit{M}_{{%d}},(A+B)$" % (clade.m + minMu))
+                            handles.append(h)
                             
                 # formats y axis labels nicely
                 # thanks copilot!
@@ -477,10 +471,9 @@ def evosim_plot(args, runs):
                     axes[idx].tick_params(labelbottom=False)
                     #axes[idx].locator_params(axis='x', nbins=5)  # just put 5 major tics
 
+                ax.set_ylabel("N" if N>0 else "frequency")
                 if numPops > 1:
-                    ax.set_ylabel(f"pop {idx}")
-                else:
-                    ax.set_ylabel("N" if N>0 else "frequency")
+                    ax.set_ylabel(f"pop {idx}\nN" if N>0 else f"pop {idx}\nfrequency")
                 
                 if xlog:
                     ax.set_xscale("log", nonpositive='mask')
@@ -503,28 +496,26 @@ def evosim_plot(args, runs):
                         y_pos = ax.get_ylim()[1] # *0.96
                         ax.text(swap_gen+(1 if xlog else 0), y_pos, label, color='gray', ha='center', va='bottom', fontsize=10) # -ax.get_xlim()[1]*0.015 + 
                 
-            plt.xlabel("generations")
+            plt.xlabel("generation (k)")
 
-        #plt.figlegend(bbox_to_anchor=(1.05, 1.0), loc='upper left')
-        #print(f"pop {idx} env: {pop.env.active_env}")
-
-        #ax = axes[numPops]
-        #ax.plot(grid.pops[0].envs)
-
-        #plt.figlegend(handles=handles, labels=labels, loc='outside right center')
         plt.figlegend(handles=handles, labels=labels,
-            loc='upper center', bbox_to_anchor=(0.5, -0.05),
-            fancybox=True, shadow=True, ncol=3)
-
-        #plt.tight_layout()
+                loc='center left', bbox_to_anchor=(1.02, 0.5),
+                fancybox=True, shadow=True, ncol=1, borderaxespad=0.0)
         #plt.savefig(f"output/plotx.png", dpi=300)
         plt.show()
     
-    ###
-    
+def evosim_plot_kfit(args, runs):
+    N, numPops, minMu, numClades, s, T, numEpochs, aToB, numRuns = \
+        args.N, args.numPops, args.minMu, args.numClades, args.s, args.T, args.numEpochs, args.aToB, args.numRuns
+
+    strN = "Inf" if N < 0 else f"{e_format(N)}"
+    colors = [col.ColorConverter.to_rgb(x) for x in ["red", "green", "blue", "magenta", "cyan", "#ff9933", "black"]]
+    xlog, ylog = args.plotLog, args.plotLog
+    lw, lsA, lsB = 1, "-", "--"
+
     # compute and plot fit, surv, surprisal for each clade, at each time, averaged over runs
     # fitness stats are for entire clades, not types. Because we might start with 0 of any type
-    if args.plotKFit:
+    if True:
         labels = []
         handles = []
 
@@ -590,8 +581,10 @@ def evosim_plot(args, runs):
                 # Fixed colors: M2 is red, M3 is green, M4 is blue, M5 is magenta, M6 is cyan, M7 is orange, 
                 # darker shade for allele A, lighter shade for allele B
                 shades = [scale_lightness(colors[clade.m + minMu - 2], scale) for scale in [0.5, .75, 1., 1.25, 1.5]]
-                handles.append(ax1.plot(clade.avgFit, color=shades[2], linestyle=lsA, linewidth=lw)[0]) # note [0]
-                labels.append(r"$\mathit{M}_{{%d}},(A+B)$" % (clade.m + minMu))
+                h = ax1.plot(clade.avgFit, color=shades[2], linestyle=lsA, linewidth=lw)[0] # note [0]
+                if idx == 0:
+                    handles.append(h)
+                    labels.append(r"$\mathit{M}_{{%d}},(A+B)$" % (clade.m + minMu))
                 ax2.plot(clade.avgSurv, color=shades[2], linestyle=lsA, linewidth=lw)
                 ax3.plot(clade.surprisal, color=shades[2], linestyle=lsA, linewidth=lw)
             # plot joint surprisal
@@ -600,6 +593,9 @@ def evosim_plot(args, runs):
             ax1.set_ylabel("W_k(0)")
             ax2.set_ylabel("S_k(0)")
             ax3.set_ylabel("H(k)")
+            if numPops > 1:
+                ax1.set_ylabel(f"pop {idx}\nW_k(0)")
+                
             if idx != numPops-1: # all except bottom plot get no x axis labels
                 ax1.tick_params(labelbottom=False)
                 ax2.tick_params(labelbottom=False)
@@ -620,15 +616,30 @@ def evosim_plot(args, runs):
                 
             ax2.set_ylim(-0.05, 1.05)
             ax3.set_ylim(-0.05, math.log2(numClades + 1))
+            
+            # print vertical lines and labels for environment swaps
+            # (ylim has to be set before this)
+            if r == 0:
+                for swap_gen, env_idx in pop.env.active_env:
+                    for ax in [ax1, ax2, ax3]:
+                        label = 'A' if env_idx == 'A' else 'B'
+                        ax.axvline(x=swap_gen+(1 if xlog else 0), color='gray', linestyle='--', linewidth=1)
+                        ax.text(swap_gen+(1 if xlog else 0), ax.get_ylim()[1], label, color='gray', ha='center', va='bottom', fontsize=10) # -ax.get_xlim()[1]*0.015 + 
+                
+            plt.xlabel("generation (k)")
 
         plt.figlegend(handles=handles, labels=labels,
-                    loc='upper center', bbox_to_anchor=(0.5, -0.05),
-                    fancybox=True, shadow=True, ncol=3)
+                    loc='center left', bbox_to_anchor=(1.02, 0.5),
+                    fancybox=True, shadow=True, ncol=1, borderaxespad=0.0)
+        #plt.savefig(f"output/plotk.png", dpi=300)
+        plt.show()
 
     
 def evosim(override_args=DotAccessibleDict()):
     args, runs = evosim_run(override_args)
     evosim_plot(args, runs)
+    if args.plotKFit:
+        evosim_plot_kfit(args, runs)
 
 if __name__ == '__main__':
     evosim()
