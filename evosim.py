@@ -17,7 +17,8 @@ class Environment:
         self.state = state # environmental state
         self.sA = sA
         self.sB = sB
-        self.active_env = [] # pairs of (gen, env)
+        self.swaps = [] # pairs of (gen, env)
+        self.invasions = [] # pairs of (gen, invader_idx)
         self.s = args.s
 
     def __repr__(self):
@@ -27,22 +28,21 @@ class Environment:
     def label(self):
         return "A" if self.state == 0 else "B"
 
-
     def swap(self, gen): # swap which allele is favored
         self.state = (self.state+1)%2 # increase/wrap state. There are only 2 states as written: 0 and 1
         assert self.state in [0, 1], f"invalid state: {self.state}"
         if self.state == 0:
-            self.sA = 0.0
-            self.sB = self.s
-        else:
             self.sA = self.s
             self.sB = 0.0
+        else:
+            self.sA = 0.0
+            self.sB = self.s
         #tmp = self.sA
         #self.sA = self.sB
         #self.sB = tmp
 
         # log data for plotting
-        self.active_env.append((gen, "A" if self.state == 0 else "B"))
+        self.swaps.append((gen, self.label()))
 
 class Clade:
     # a clade contains two genotypes: A and B, with the same fixed mutation rate
@@ -58,13 +58,27 @@ class Clade:
         self.mu = 10.0**(-1.0 * (m+minMu)) # mutation rate
         self.label = f"M{m+minMu}" # clade labels M2, M3, M4, ... for printing
 
-        fracA = 1.0 / numClades * aToB  # initial fraction of A genotype
-        fracB = 1.0 / numClades * (1.0 - aToB) # initial fraction of B genotype
+        if args.incumbent is None:
+            fracA = 1.0 / numClades * aToB  # initial fraction of A genotype
+            fracB = 1.0 / numClades * (1.0 - aToB) # initial fraction of B genotype
+        else:
+            if m == args.incumbent-args.minMu: # this one starts with all the initial freq
+                fracA = 1.0 * aToB
+                fracB = 1.0 * (1.0 - aToB)
+            else:
+                fracA = 0.0
+                fracB = 0.0
+            
+        #print(f"clade {self.label} initial fracA:{fracA} fracB:{fracB}. N:{self.N}")
         if self.N < 0:  # infinite pop - floating point "frequency" of each genotype
             self.nA = fracA
             self.nB = fracB
         else: # finite pop - integer count of each genotype
-            self.nA, self.nB = binom.rvs(n=round(self.N), p=[fracA, fracB])
+            # save computing binom if both fracs are 0.0, just set count to 0
+            if fracA == 0.0 and fracB == 0.0:
+                self.nA, self.nB = 0, 0
+            else:
+                self.nA, self.nB = binom.rvs(n=round(self.N), p=[fracA, fracB])
 
         # for logging of the counts of the 2 genotypes within the clade over time
         self.countsA = []
@@ -113,9 +127,11 @@ class Clade:
             self.nB = fracB # total N of this type
         else:
             # finite pop - convert to integer
-            # save computing binom if frac is 0.0 anyway, just set count to 0
-            self.nA = 0 if fracA == 0.0 else binom.rvs(n=round(N), p=fracA) # total N of this type
-            self.nB = 0 if fracB == 0.0 else binom.rvs(n=round(N), p=fracB) # total N of this type
+            # save computing binom if both fracs are 0.0, just set count to 0
+            if fracA == 0.0 and fracB == 0.0:
+                self.nA, self.nB = 0, 0
+            else:
+                self.nA, self.nB = binom.rvs(n=round(self.N), p=[fracA, fracB])
 
 
 class Pop:
@@ -176,14 +192,6 @@ class Pop:
         sumN = self.sumN()
         for clade in self.clades:
             clade.normalize(sumN, self.N)
-
-    def one_gen_mutation_mode(self):
-        self.update_gen_data()
-        self.select() # converts from int to freq
-        if self.args.includeMutation:
-            self.mutate() # works on freq
-        self.normalize() # converts from freq to int
-
 
 class Grid():
     # A grid contains multiple populations
@@ -283,10 +291,33 @@ class Grid():
             if self.printStats:
                 print(self) # start of every epoch
 
+        # invasion event
+        if self.args.invader is not None and gen!=0 and gen%self.args.T != 0 and gen%(self.args.T//2) == 0: # invasion in the middle of each epoch
+            for pop in self.pops:
+                invaderFrac = 0.01
+                if self.args.N < 0:
+                    numInvaders = invaderFrac # freq
+                else:
+                    numInvaders = round(invaderFrac * self.args.N) # count
+                # log invasion data for plotting
+                invader_idx = self.args.invader - self.args.minMu
+                pop.env.invasions.append((gen, pop.clades[invader_idx].label))
+                if pop.env.state == 0: # env A
+                    #print(f"gen:{gen} pop:{pop.label} invading with {numInvaders} of clade {self.args.invader} into env A")
+                    pop.clades[invader_idx].nA += numInvaders # just A invades
+                else: # env B
+                    #print(f"gen:{gen} pop:{pop.label} invading with {numInvaders} of clade {self.args.invader} into env B")
+                    pop.clades[self.args.invader-self.args.minMu].nB += numInvaders # just B invades
+
         # the mode is fixed for each run - either 'mutation' or 'migration'
         if self.mode == 'mutation':
             for pop in self.pops:
-                pop.one_gen_mutation_mode()
+                pop.update_gen_data()
+                pop.select() # converts from int to freq
+                if self.args.includeMutation:
+                    pop.mutate() # works on freq
+                pop.normalize() # converts from freq to int                
+
         elif self.mode == 'migration':
             # migration mode is tricker because migration happens between populations
             for pop in self.pops:
@@ -302,7 +333,8 @@ class Grid():
 
 default_args = DotAccessibleDict({'numPops': 1, 'N': 1e5, 'minMu':2, 'numClades': 1, 'aToB': 0.5, 'T':1e3, 's':0.1, \
                 'numEpochs':1, 'numRuns':1, 'includeMutation': True, 'stochasticEnv': False, \
-                'plotLog': False, 'plotAB': True, 'plotKFit': False, 'hideB': False, 'printStats': False})
+                'plotLog': False, 'plotAB': True, 'plotKFit': False, 'hideB': False, 'printStats': False, \
+                'maxProcs': 16, 'incumbent': None, 'invader': None})
 
 def round_to_int(x, name):
     rounded = round(x)
@@ -341,6 +373,12 @@ def check_args(default_args, override_args):
     assertx(args.numClades >=1 and args.minMu+args.numClades <=9, "numClades must be >= 1, and minMu+numClades must be <=9")
     assertx(args.numPops >= 1, "numPops must be 1 for mutation mode, or >=1 for migration mode")
     assertx((args.aToB >= 0 and args.aToB <= 1.0), "aToB must be between 0.0 and 1.0")
+    
+    assertx((args.incumbent is None and args.invader is None) or (args.incumbent is not None and args.invader is not None), "either both incumbent and invader must be set, or both must be None")
+    if args.incumbent is not None:
+        assertx(args.incumbent >= args.minMu and args.incumbent < args.minMu + args.numClades, f"incumbent must be between {args.minMu} and {args.minMu + args.numClades - 1}")
+    if args.invader is not None:
+        assertx(args.invader >= args.minMu and args.invader < args.minMu + args.numClades, f"invader must be between {args.minMu} and {args.minMu + args.numClades - 1}")
 
     args['mode'] = 'mutation' if args['numPops'] == 1 else 'migration' # might change this later
     args.N = round_to_int(args.N, "N")
@@ -402,8 +440,7 @@ def evosim_run(override_args=DotAccessibleDict()):
             run = one_run(copy.deepcopy(args))
             runs.append(run)
     else:
-        maxProcs = 8 # hard limit
-        nproc = min(maxProcs, min(args.numRuns, os.cpu_count() or 1))
+        nproc = min(args.maxProcs, min(args.numRuns, os.cpu_count() or 1))
         if True: #args.printStats:
             print(f"Using {nproc} processes for {args.numRuns} runs.")
         # deepcopy args for each run so worker-local mutations don't interfere
@@ -427,7 +464,8 @@ def evosim_plot(args, runs):
         labels = []
         handles = []
 
-        fig, axes = plt.subplots(numPops, layout='constrained', figsize=(4.0, 4.0)) #numPops*4.0)) # 6.4x numPops*4.8.
+        fig, axes = plt.subplots(numPops, layout='constrained', figsize=(8.0, numPops*4.0)) #numPops*4.0)) # 6.4x numPops*4.8.
+        #fig, axes = plt.subplots(numPops, layout='constrained', figsize=(4.0, 4.0)) #numPops*4.0)) # 6.4x numPops*4.8.
         if numPops == 1: axes = [axes]
         fig.suptitle(f"N={strN}, s={e_format(s)}, T={e_format(T)}"+f" ({numRuns} runs)" if numRuns>1 else "")
 
@@ -492,11 +530,15 @@ def evosim_plot(args, runs):
                 # print vertical lines and labels for environment swaps
                 # (ylim has to be set before this)
                 if r == 0:
-                    for swap_gen, env_idx in pop.env.active_env:
+                    for swap_gen, env_label in pop.env.swaps:
                         ax.axvline(x=swap_gen+(1 if xlog else 0), color='gray', linestyle='--', linewidth=1)
-                        label = 'A' if env_idx == 'A' else 'B'
-                        y_pos = ax.get_ylim()[1] # *0.96
-                        ax.text(swap_gen+(1 if xlog else 0), y_pos, label, color='gray', ha='center', va='bottom', fontsize=10) # -ax.get_xlim()[1]*0.015 + 
+                        y_pos = ax.get_ylim()[1]
+                        ax.text(swap_gen+(1 if xlog else 0), y_pos, env_label, color='gray', ha='center', va='bottom', fontsize=10) # -ax.get_xlim()[1]*0.015 + 
+                    if args.invader is not None:
+                        for (invasion_gen, invader_idx) in pop.env.invasions:
+                            ax.axvline(x=invasion_gen+(1 if xlog else 0), color='gray', linestyle=':', linewidth=1)
+                            y_pos = ax.get_ylim()[1]
+                            ax.text(invasion_gen+(1 if xlog else 0), y_pos, f"i{invader_idx}", color='lightgray', ha='center', va='bottom', fontsize=10) # -ax.get_xlim()[1]*0.015 + 
                 
             plt.xlabel("generation (k)")
 
@@ -636,12 +678,16 @@ def evosim_plot_kfit(args_orig, runs_orig):
         
         # print vertical lines and labels for environment swaps
         # (ylim has to be set before this)
-        if r == 0:
-            for swap_gen, env_idx in pop.env.active_env:
-                for ax in [ax1, ax2, ax3]:
-                    label = 'A' if env_idx == 'A' else 'B'
-                    ax.axvline(x=swap_gen+(1 if xlog else 0), color='gray', linestyle='--', linewidth=1)
-                    ax.text(swap_gen+(1 if xlog else 0), ax.get_ylim()[1], label, color='gray', ha='center', va='bottom', fontsize=10) # -ax.get_xlim()[1]*0.015 + 
+        for swap_gen, env_label in pop.env.swaps:
+            for ax in [ax1, ax2, ax3]:
+                ax.axvline(x=swap_gen+(1 if xlog else 0), color='gray', linestyle='--', linewidth=1)
+                ax.text(swap_gen+(1 if xlog else 0), ax.get_ylim()[1], env_label, color='gray', ha='center', va='bottom', fontsize=10) # -ax.get_xlim()[1]*0.015 + 
+            if args.invader is not None:
+                for (invasion_gen, invader_idx) in pop.env.invasions:
+                    for ax in [ax1, ax2, ax3]:
+                        ax.axvline(x=invasion_gen+(1 if xlog else 0), color='gray', linestyle=':', linewidth=1)
+                        y_pos = ax.get_ylim()[1]
+                        ax.text(invasion_gen+(1 if xlog else 0), y_pos, f"i{invader_idx}", color='lightgray', ha='center', va='bottom', fontsize=10) # -ax.get_xlim()[1]*0.015 +                  
             
         plt.xlabel("generation (k)")
 
