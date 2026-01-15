@@ -26,7 +26,7 @@ class Environment:
         return ret
 
     def label(self):
-        return "A" if self.state == 0 else "B"
+        return "A" if self.state == 0 else "a" #"B"
 
     def swap(self, gen): # swap which allele is favored
         self.state = (self.state+1)%2 # increase/wrap state. There are only 2 states as written: 0 and 1
@@ -78,7 +78,8 @@ class Clade:
             if fracA == 0.0 and fracB == 0.0:
                 self.nA, self.nB = 0, 0
             else:
-                self.nA, self.nB = binom.rvs(n=round(self.N), p=[fracA, fracB])
+                #self.nA, self.nB = binom.rvs(n=round(self.N), p=[fracA, fracB])
+                self.nA, self.nB = self.args.numpy_randomGen.binomial(n=round(self.N), p=[fracA, fracB])
 
         # for logging of the counts of the 2 genotypes within the clade over time
         self.countsA = []
@@ -131,7 +132,8 @@ class Clade:
             if fracA == 0.0 and fracB == 0.0:
                 self.nA, self.nB = 0, 0
             else:
-                self.nA, self.nB = binom.rvs(n=round(self.N), p=[fracA, fracB])
+                #self.nA, self.nB = binom.rvs(n=round(self.N), p=[fracA, fracB])
+                self.nA, self.nB = self.args.numpy_randomGen.binomial(n=round(self.N), p=[fracA, fracB])
 
 
 class Pop:
@@ -334,7 +336,7 @@ class Grid():
 default_args = DotAccessibleDict({'numPops': 1, 'N': 1e5, 'minMu':2, 'numClades': 1, 'aToB': 0.5, 'T':1e3, 's':0.1, \
                 'numEpochs':1, 'numRuns':1, 'includeMutation': True, 'stochasticEnv': False, \
                 'plotLog': False, 'plotAB': True, 'plotKFit': False, 'hideB': False, 'printStats': False, \
-                'maxProcs': 16, 'incumbent': None, 'invader': None})
+                'maxProcs': 16, 'incumbent': None, 'invader': None, 'seed': None})
 
 def round_to_int(x, name):
     rounded = round(x)
@@ -393,7 +395,7 @@ def check_args(default_args, override_args):
     return args
 
 
-#timeit
+@timeit
 def evosim_run(override_args=DotAccessibleDict()):
     global default_args
     # numPops: number of populations
@@ -414,6 +416,15 @@ def evosim_run(override_args=DotAccessibleDict()):
     N, numPops, minMu, numClades, s, T, numEpochs, aToB, numRuns = \
         args.N, args.numPops, args.minMu, args.numClades, args.s, args.T, args.numEpochs, args.aToB, args.numRuns
         
+    if not args.seed:
+        args.seed = random.randint(0, 2**32 - 1)
+    print("Setting random seed to:", args.seed)
+    random.seed(args.seed)
+    args.numpy_randomGen = np.random.Generator(np.random.PCG64(args.seed))
+    
+    if not args.includeMutation:
+        print("Mutation is DISABLED in this run")        
+    
     if N>0:
         Ns = abs(N*s)
         print(f"Ns:{Ns} is low < 10.0 (selection is WEAK relative to drift)" if Ns < 10.0 else f"Ns:{Ns} is high >= 10.0 (selection is STRONG relative to drift)")
@@ -444,7 +455,12 @@ def evosim_run(override_args=DotAccessibleDict()):
         if True: #args.printStats:
             print(f"Using {nproc} processes for {args.numRuns} runs.")
         # deepcopy args for each run so worker-local mutations don't interfere
-        arg_list = [copy.deepcopy(args) for _ in range(args.numRuns)]
+        arg_list = []
+        for _ in range(args.numRuns):
+            arg_list.append(copy.deepcopy(args))
+            # ensure a different seed per run
+            args.numpy_randomGen = np.random.Generator(np.random.PCG64(random.randint(0, 2**32 - 1)))
+            random.seed(random.randint(0, 2**32 - 1))
         ctx = multiprocessing.get_context("spawn")
         with ctx.Pool(processes=nproc) as pool:
             runs = pool.map(one_run, arg_list)
@@ -464,10 +480,10 @@ def evosim_plot(args, runs):
         labels = []
         handles = []
 
-        fig, axes = plt.subplots(numPops, layout='constrained', figsize=(8.0, numPops*4.0)) #numPops*4.0)) # 6.4x numPops*4.8.
+        fig, axes = plt.subplots(numPops, layout='constrained', figsize=(8.0, numPops*3.5)) #numPops*4.0)) # 6.4x numPops*4.8.
         #fig, axes = plt.subplots(numPops, layout='constrained', figsize=(4.0, 4.0)) #numPops*4.0)) # 6.4x numPops*4.8.
         if numPops == 1: axes = [axes]
-        fig.suptitle(f"N={strN}, s={e_format(s)}, T={e_format(T)}"+f" ({numRuns} runs)" if numRuns>1 else "")
+        fig.suptitle(f"N={strN}, s={e_format(s)}, T={e_format(T)}"+(f" ({numRuns} runs)" if numRuns>1 else ""))
 
         for r in range(numRuns): # each independent run
             grid = runs[r].grid
@@ -490,11 +506,13 @@ def evosim_plot(args, runs):
                             h = ax.plot(clade.countsB, color=shades[3], linestyle=lsB, linewidth=lw)[0]
                             if idx == 0 and r == 0: # only add handles and labels once
                                 handles.append(h)
-                                labels.append(r"$\mathit{M}_{{%d}},B$" % (clade.m + minMu))
+                                #labels.append(r"$\mathit{M}_{{%d}},B$" % (clade.m + minMu))
+                                labels.append(r"$\mathit{M}_{{%d}},a$" % (clade.m + minMu))
                     else: # plot A+B
                         h = ax.plot(clade.counts, color=shades[2], linestyle=lsA, linewidth=lw)[0] # note [0]
                         if idx == 0 and r == 0: # only add handles  and labels once
-                            labels.append(r"$\mathit{M}_{{%d}},(A+B)$" % (clade.m + minMu))
+                            #labels.append(r"$\mathit{M}_{{%d}},(A+B)$" % (clade.m + minMu))
+                            labels.append(r"$\mathit{M}_{{%d}},(A+a)$" % (clade.m + minMu))
                             handles.append(h)
                             
                 # formats y axis labels nicely
@@ -625,8 +643,8 @@ def evosim_plot_kfit(args_orig, runs_orig):
 
 
     # now plot the avg fit (left axis) and surv (right axis) data, with one row for each pop
-    fig, axes = plt.subplots(numPops, 3, layout='constrained', figsize=(3*4.0, 4.0)) #numPops*4.0)) # Adjust figsize as needed
-    fig.suptitle(f"N={strN}, s={e_format(s)}, T={e_format(T)}"+f" ({numRuns} runs)" if numRuns>1 else "")
+    fig, axes = plt.subplots(numPops, 3, layout='constrained', figsize=(8.0, 3.5)) #numPops*3.5)) # Adjust figsize as needed
+    fig.suptitle(f"N={strN}, s={e_format(s)}, T={e_format(T)}"+(f" ({numRuns} runs)" if numRuns>1 else ""))
     for idx, pop in enumerate(grid.pops): # each deme in the grid
         if numPops == 1:
             ax1, ax2, ax3 = axes[0], axes[1], axes[2]
@@ -643,7 +661,8 @@ def evosim_plot_kfit(args_orig, runs_orig):
             h = ax1.plot(clade.avgFit, color=shades[2], linestyle=lsA, linewidth=lw)[0] # note [0]
             if idx == 0:
                 handles.append(h)
-                labels.append(r"$\mathit{M}_{{%d}},(A+B)$" % (clade.m + minMu))
+                #labels.append(r"$\mathit{M}_{{%d}},(A+B)$" % (clade.m + minMu))
+                labels.append(r"$\mathit{M}_{{%d}},(A+a)$" % (clade.m + minMu))
             ax2.plot(clade.avgSurv, color=shades[2], linestyle=lsA, linewidth=lw)
             ax3.plot(clade.surprisal, color=shades[2], linestyle=lsA, linewidth=lw)
         # plot joint surprisal
