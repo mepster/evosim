@@ -668,6 +668,10 @@ def evosim_plot_kfit(args_orig, runs_orig):
     fig, axes = plt.subplots(1, 3, layout='constrained', figsize=(12.0, 3.5)) #numPops*3.5)) # Adjust figsize as needed
     fig.suptitle(f"N={strN}, s={e_format(s)}, T={e_format(T)}"+(f" ({numRuns} runs)" if numRuns>1 else ""))
 
+    for idx2, clade in enumerate(combined_pop.clades):
+        print(f"Clade M{clade.m + minMu}: Final avgFit={clade.avgFit[-1]:.4f}, Final avgSurv={clade.avgSurv[-1]:.4f}, Final surprisal={clade.surprisal[-1]:.4f}")
+    print(f"Final joint surprisal={joint_surprisal[-1]:.4f}")
+
     handles, labels = [], []
     ax1, ax2, ax3 = axes[0], axes[1], axes[2]
     idx, idx2, grid, pop, clade = None, None, None, None, None # for safety
@@ -697,9 +701,9 @@ def evosim_plot_kfit(args_orig, runs_orig):
     ax2.set_ylabel("k-survivability")
     ax3.set_ylabel("k-surprisal")
         
-    ax1.tick_params(labelbottom=False)
-    ax2.tick_params(labelbottom=False)
-    ax3.tick_params(labelbottom=False)
+    # ax1.tick_params(labelbottom=False)
+    # ax2.tick_params(labelbottom=False)
+    # ax3.tick_params(labelbottom=False)
     ax1.locator_params(axis='x', nbins=5)  # just put 5 major tics
     ax2.locator_params(axis='x', nbins=5)  # just put 5 major tics
     ax3.locator_params(axis='x', nbins=5)  # just put 5 major tics
@@ -717,22 +721,23 @@ def evosim_plot_kfit(args_orig, runs_orig):
     ax2.set_ylim(-0.05, 1.05)
     ax3.set_ylim(-0.05, numClades)
     
-    if args_orig.numPops == 1:
-        # only show swaps if there was one pop - otherwise it's too messy
-        swap_pop = runs_orig[0].grid.pops[0]
-        # print vertical lines and labels for environment swaps
-        # (ylim has to be set before this)
-        for swap_gen, env_label in swap_pop.env.swaps:
-            for ax in [ax1, ax2, ax3]:
-                ax.axvline(x=swap_gen+(1 if xlog else 0), color='gray', linestyle='--', linewidth=1)
-                ax.text(swap_gen+(1 if xlog else 0), ax.get_ylim()[1], env_label, color='gray', ha='center', va='bottom', fontsize=10) # -ax.get_xlim()[1]*0.015 + 
-            if args.invader is not None:
-                for (invasion_gen, invader_idx) in combined_pop.env.invasions:
-                    for ax in [ax1, ax2, ax3]:
-                        ax.axvline(x=invasion_gen+(1 if xlog else 0), color='gray', linestyle=':', linewidth=1)
-                        y_pos = ax.get_ylim()[1]
-                        ax.text(invasion_gen+(1 if xlog else 0), y_pos, f"i{invader_idx}", color='lightgray', ha='center', va='bottom', fontsize=10) # -ax.get_xlim()[1]*0.015 +                  
-        
+    if False: # show swaps
+        if args_orig.numPops == 1:
+            # only show swaps if there was one pop - otherwise it's too messy
+            swap_pop = runs_orig[0].grid.pops[0]
+            # print vertical lines and labels for environment swaps
+            # (ylim has to be set before this)
+            for swap_gen, env_label in swap_pop.env.swaps:
+                for ax in [ax1, ax2, ax3]:
+                    ax.axvline(x=swap_gen+(1 if xlog else 0), color='gray', linestyle='--', linewidth=1)
+                    ax.text(swap_gen+(1 if xlog else 0), ax.get_ylim()[1], env_label, color='gray', ha='center', va='bottom', fontsize=10) # -ax.get_xlim()[1]*0.015 + 
+                if args.invader is not None:
+                    for (invasion_gen, invader_idx) in combined_pop.env.invasions:
+                        for ax in [ax1, ax2, ax3]:
+                            ax.axvline(x=invasion_gen+(1 if xlog else 0), color='gray', linestyle=':', linewidth=1)
+                            y_pos = ax.get_ylim()[1]
+                            ax.text(invasion_gen+(1 if xlog else 0), y_pos, f"i{invader_idx}", color='lightgray', ha='center', va='bottom', fontsize=10) # -ax.get_xlim()[1]*0.015 +                  
+            
     plt.xlabel("generation (k)")
     plt.figlegend(handles=handles, labels=labels,
                 loc='center left', bbox_to_anchor=(1.02, 0.5),
